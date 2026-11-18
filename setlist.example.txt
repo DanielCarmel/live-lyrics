@@ -1,0 +1,5 @@
+# One song per line: Artist - Title
+# Songs here are recognized from their sung lyrics (live band mode), no API keys needed.
+Queen - Bohemian Rhapsody
+Coldplay - Yellow
+Adele - Someone Like You

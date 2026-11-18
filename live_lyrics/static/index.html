@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Lyrics</title>
+<!-- Display fonts (each style pairs a Latin face with a Hebrew one). Offline, system fonts take over. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Amatic+SC:wght@700&family=Anton&family=Archivo+Black&family=Assistant:wght@300&family=Audiowide&family=Bangers&family=Bebas+Neue&family=Bellefair&family=Caveat:wght@700&family=Cormorant+Garamond:ital,wght@1,600&family=DM+Serif+Display&family=Frank+Ruhl+Libre:wght@500;700&family=Fredoka:wght@600;700&family=Gveret+Levin&family=Heebo:wght@900&family=Karantina:wght@700&family=Lilita+One&family=Limelight&family=Miriam+Libre:wght@700&family=Orbitron:wght@700;900&family=Pacifico&family=Permanent+Marker&family=Playfair+Display:ital,wght@1,600;1,800&family=Playpen+Sans+Hebrew:wght@700&family=Poiret+One&family=Righteous&family=Rubik:wght@400;600;800;900&family=Rubik+Dirt&family=Rubik+Glitch&family=Rubik+Spray+Paint&family=Secular+One&family=Special+Elite&family=Suez+One&family=Varela+Round&display=swap">
+<style>
+  :root { --bg:#06060a; --fg:#f5f5f7; --dim:#8a8a9a; --accent:124,156,255; --beat:0; --fade:.5s;
+    --ui:"Rubik",system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Noto Sans Hebrew",sans-serif; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html { background:var(--bg); }      /* (not on body: that would paint over the background layers) */
+  html,body { height:100%; color:var(--fg); font-family:var(--ui); overflow:hidden; cursor:none; }
+
+  /* ---------- background: drifting blurred cover + accent glow that breathes with the music ---------- */
+  #bg, #glow, #vignette, #fx { position:fixed; inset:0; z-index:-1; }
+  #bg { inset:-20%; background-size:cover; background-position:center; opacity:0; transition:opacity 1.2s ease;
+    filter:blur(70px) saturate(1.5) brightness(.36);
+    animation:drift 48s ease-in-out infinite alternate; }
+  #bg.on { opacity:1; }
+  @keyframes drift { 0%{transform:scale(1) translate(0,0) rotate(0deg)} 50%{transform:scale(1.12) translate(3%,-2%) rotate(3deg)} 100%{transform:scale(1.05) translate(-3%,3%) rotate(-2deg)} }
+  #glow { opacity:0; transition:opacity 1.2s ease; }
+  #glow.on { opacity:1; }
+  #glow i { position:absolute; inset:0; background:radial-gradient(60% 55% at 50% 55%, rgba(var(--accent),.34), transparent 70%);
+    opacity:calc(.55 + .45 * var(--beat)); will-change:opacity; transition:opacity .12s linear; }
+  #fx { width:100%; height:100%; }          /* the orb (listening) and floating lights (song) */
+  #vignette { background:radial-gradient(120% 90% at 50% 50%, transparent 40%, rgba(0,0,0,.6) 100%); }
+
+  /* ---------- screens fade instead of popping ---------- */
+  .screen { position:fixed; inset:0; transition:opacity var(--fade) ease; }
+  .screen.hidden { opacity:0; pointer-events:none; }
+
+  /* ---------- listening / identifying ---------- */
+  #listening { overflow:hidden; }
+  /* slow coloured light drifting behind everything */
+  .aurora i { position:absolute; width:78vmax; height:78vmax; border-radius:50%; left:50%; top:50%; margin:-39vmax; will-change:transform; }
+  .aurora i:nth-child(1) { background:radial-gradient(circle, rgba(var(--accent),.30), transparent 62%); animation:au1 38s ease-in-out infinite alternate; }
+  .aurora i:nth-child(2) { background:radial-gradient(circle, rgba(255,60,170,.17), transparent 60%); animation:au2 46s ease-in-out infinite alternate; }
+  .aurora i:nth-child(3) { background:radial-gradient(circle, rgba(40,200,255,.15), transparent 60%); animation:au3 52s ease-in-out infinite alternate; }
+  @keyframes au1 { 0%{transform:translate(-22vw,-12vh) scale(1)} 100%{transform:translate(18vw,10vh) scale(1.2)} }
+  @keyframes au2 { 0%{transform:translate(30vw,18vh) scale(1.1)} 100%{transform:translate(-26vw,-6vh) scale(.9)} }
+  @keyframes au3 { 0%{transform:translate(-30vw,24vh) scale(.9)} 100%{transform:translate(24vw,-22vh) scale(1.15)} }
+  #ring { position:absolute; left:50%; top:43%; width:64vmin; height:64vmin; transform:translate(-50%,-50%); }
+  #listening .cap { position:absolute; left:0; right:0; top:calc(43% + 35vmin); display:flex; flex-direction:column; align-items:center; gap:2.6vh; text-align:center; }
+  #listening .msg { font-size:clamp(1rem,2.1vw,2rem); font-weight:600; letter-spacing:.5em; margin-inline-start:.5em; text-transform:uppercase; color:#fff; }
+  #listening .msg.swap { animation:msgin .8s cubic-bezier(.2,.9,.25,1); }
+  @keyframes msgin { 0%{opacity:0; letter-spacing:.9em; transform:translateY(.4em)} 100%{opacity:1; letter-spacing:.5em; transform:none} }
+  #listening .pill { display:flex; align-items:center; gap:.8em; padding:.6em 1.3em; border-radius:99px; font-size:clamp(.8rem,1.15vw,1.1rem); color:rgba(255,255,255,.72);
+    letter-spacing:.04em; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13); }
+  #listening .pill b { width:.6em; height:.6em; border-radius:50%; background:rgb(var(--accent)); box-shadow:0 0 .8em rgb(var(--accent)); animation:live 2.4s ease-in-out infinite; }
+  #listening.hearing .pill b { animation-duration:.8s; }
+  @keyframes live { 0%,100%{opacity:.35; transform:scale(.8)} 50%{opacity:1; transform:scale(1.15)} }
+  #listening .brand { position:absolute; top:4.5vh; left:3.2vw; font-size:clamp(.7rem,1vw,1rem); font-weight:800; letter-spacing:.42em; color:rgba(255,255,255,.55); }
+  #listening .brand em { font-style:normal; color:rgb(var(--accent)); }
+  #clock { position:absolute; top:3.4vh; right:3.2vw; font-size:clamp(1.2rem,2.4vw,2.4rem); font-weight:400; letter-spacing:.06em; color:rgba(255,255,255,.7); font-variant-numeric:tabular-nums; }
+
+  /* ---------- song: header ---------- */
+  header { z-index:2; position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:1.2rem; padding:2rem 3rem;
+    transition:opacity .6s ease, transform .6s cubic-bezier(.22,1,.36,1); }
+  header img { width:72px; height:72px; border-radius:10px; object-fit:cover; box-shadow:0 8px 28px #000a; }
+  #title { font-size:1.7rem; font-weight:800; }
+  #artist { font-size:1.15rem; color:rgba(255,255,255,.6); margin-top:.15rem; }
+  #badge { font-size:.75rem; font-weight:700; letter-spacing:.12em; padding:.25em .6em; border-radius:4px;
+    background:#e5484d; color:#fff; vertical-align:middle; margin-inline-start:.7rem; display:none; }
+
+  /* ---------- song: the lyric stage. One line at a time, each arriving with its own move ---------- */
+  #tr { font-size:.7rem; font-weight:600; letter-spacing:.14em; padding:.25em .65em; border-radius:99px; border:1px solid rgba(255,255,255,.3);
+    color:rgba(255,255,255,.7); vertical-align:middle; margin-inline-start:.7rem; display:none; text-transform:uppercase; }
+  #stage { position:absolute; inset:15vh 0 7vh; transition:opacity .6s ease; perspective:1100px;
+    --font:var(--ui); --weight:800; --lh:1.08; --ls:-.01em; --case:none; --tilt:0deg; --size:1; --style:normal;
+    --shadow:0 .04em .4em rgba(0,0,0,.55), 0 0 .5em rgba(var(--accent),.45); }
+  .lyric { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+  .pulse { transform:rotate(var(--tilt)); }
+  .mover { will-change:transform; animation:creep var(--dur,6s) linear both; }                                          /* never quite still */
+  @keyframes creep { 0%{transform:scale(.97)} 100%{transform:scale(1.07)} }
+  .text { max-width:86vw; text-align:center; font-family:var(--font); font-weight:var(--weight); font-style:var(--style);
+    line-height:var(--lh); letter-spacing:var(--ls); text-transform:var(--case); text-wrap:balance; color:#fff; text-shadow:var(--shadow);
+    }
+  .text .row + .row { margin-top:.28em; }
+  .w { display:inline-block; white-space:nowrap; margin:0 .13em; transform-origin:50% 70%; will-change:transform, opacity; backface-visibility:hidden; }
+  .c { display:inline-block; }
+  .w.em { color:rgb(var(--accent)); }
+  .calm .text { font-family:var(--ui); font-weight:600; font-style:normal; text-transform:none; letter-spacing:0; line-height:1.3; opacity:.9; filter:none; }
+
+  /* the styles: chosen from the song's genre (and, within a genre, by the song itself) */
+  #stage[data-theme=pop]   { --font:"Fredoka","Rubik",var(--ui); --weight:700; }
+  #stage[data-theme=rock]  { --font:"Anton","Karantina","Rubik",var(--ui); --weight:400; --case:uppercase; --tilt:-2.5deg; --ls:.01em; --lh:1.12; --size:1.08;
+    --shadow:.045em .05em 0 rgba(var(--accent),.85), 0 .1em .5em rgba(0,0,0,.6); }
+  #stage[data-theme=rock] .w:lang(he) { font-weight:700; }
+  #stage[data-theme=hiphop]{ --font:"Rubik",var(--ui); --weight:900; --case:uppercase; --ls:-.03em; --lh:1.04; }
+  #stage[data-theme=hiphop] .w.em { color:#0a0a0e; background:rgb(var(--accent)); padding:0 .16em; border-radius:.08em; text-shadow:none; filter:none; }
+  #stage[data-theme=neon]  { --font:"Orbitron","Rubik",var(--ui); --weight:800; --case:uppercase; --ls:.05em; --lh:1.25; --size:.84;
+    --shadow:0 0 .12em #fff, 0 0 .45em rgb(var(--accent)), 0 0 1.1em rgba(var(--accent),.7); }
+  #stage[data-theme=neon] .text { animation:flicker 5s linear infinite; }
+  @keyframes flicker { 0%,91%,94%,97%,100%{opacity:1} 92.5%{opacity:.6} 95.5%{opacity:.8} }
+  #stage[data-theme=soul]  { --font:"Playfair Display","Frank Ruhl Libre",Georgia,serif; --weight:700; --style:italic; --lh:1.16; --ls:0; }
+  #stage[data-theme=indie] { --font:"Caveat","Amatic SC","Rubik",var(--ui); --weight:700; --lh:1.02; --size:1.16; --tilt:-1.5deg; --ls:0; }
+  #stage[data-theme=sun]   { --font:"Suez One","Secular One","Rubik",var(--ui); --weight:400; --lh:1.14; --ls:0;
+    --shadow:.04em .05em 0 rgba(0,0,0,.45), 0 .1em .6em rgba(0,0,0,.5); }
+  #stage[data-theme=bubble] { --font:"Lilita One","Varela Round",var(--ui); --weight:400; --shadow:0 .07em 0 rgba(0,0,0,.4), 0 0 .5em rgba(var(--accent),.4); }
+  #stage[data-theme=marker] { --font:"Permanent Marker","Gveret Levin",var(--ui); --weight:400; --tilt:-2deg; --lh:1.15; --ls:0; }
+  #stage[data-theme=comic]  { --font:"Bangers","Karantina",var(--ui); --weight:400; --case:uppercase; --ls:.035em; --tilt:-3deg; --size:1.1; --lh:1.1;
+    --shadow:.05em .06em 0 #000, .09em .1em 0 rgba(var(--accent),.9); }
+  #stage[data-theme=comic] .w:lang(he), #stage[data-theme=poster] .w:lang(he) { font-weight:700; }
+  #stage[data-theme=comic] .w.em { color:#ffe14d; }
+  #stage[data-theme=grunge] { --font:"Rubik Dirt","Rubik",var(--ui); --weight:400; --case:uppercase; --ls:0; --lh:1.1; --size:.95; --tilt:1.5deg; }
+  #stage[data-theme=poster] { --font:"Bebas Neue","Karantina",var(--ui); --weight:400; --case:uppercase; --ls:.04em; --lh:1.05; --size:1.18; }
+  #stage[data-theme=slab]   { --font:"Alfa Slab One","Suez One",var(--ui); --weight:400; --ls:0; --lh:1.14; --size:.95;
+    --shadow:.04em .05em 0 rgba(0,0,0,.5), 0 0 .5em rgba(var(--accent),.35); }
+  #stage[data-theme=street] { --font:"Rubik Spray Paint","Rubik",var(--ui); --weight:400; --case:uppercase; --ls:0; --tilt:-3deg; --lh:1.1; }
+  #stage[data-theme=bold]   { --font:"Archivo Black","Heebo",var(--ui); --weight:400; --case:uppercase; --ls:-.02em; --lh:1.04; }
+  #stage[data-theme=bold] .w:lang(he) { font-weight:900; }
+  #stage[data-theme=bold] .w.em { color:#0a0a0e; background:#fff; padding:0 .16em; text-shadow:none; }
+  #stage[data-theme=synth]  { --font:"Audiowide","Rubik",var(--ui); --weight:400; --case:uppercase; --ls:.03em; --lh:1.2; --size:.86;
+    --shadow:.035em .035em 0 rgba(255,0,200,.75), -.035em -.035em 0 rgba(0,230,255,.75); }
+  #stage[data-theme=glitch] { --font:"Rubik Glitch","Rubik",var(--ui); --weight:400; --case:uppercase; --ls:.01em; --lh:1.12; --size:.95; }
+  #stage[data-theme=retro]  { --font:"Righteous","Varela Round",var(--ui); --weight:400; --ls:.01em; --lh:1.14;
+    --shadow:.035em .035em 0 rgb(var(--accent)), .07em .07em 0 rgba(var(--accent),.6), .105em .105em 0 rgba(var(--accent),.3); }
+  #stage[data-theme=retro] .w.em { color:#fff; box-shadow:inset 0 -.12em 0 rgb(var(--accent)); }
+  #stage[data-theme=elegant]{ --font:"Cormorant Garamond","Frank Ruhl Libre",Georgia,serif; --weight:600; --style:italic; --lh:1.12; --ls:0; --size:1.1; }
+  #stage[data-theme=velvet] { --font:"DM Serif Display","Suez One",Georgia,serif; --weight:400; --lh:1.14; --ls:0; }
+  #stage[data-theme=velvet] .w.em, #stage[data-theme=poster] .w.em { color:#fff; box-shadow:inset 0 -.1em 0 rgb(var(--accent)); }
+  #stage[data-theme=folk]   { --font:"Amatic SC","Rubik",var(--ui); --weight:700; --case:uppercase; --ls:.06em; --lh:1.05; --size:1.25; }
+  #stage[data-theme=typewriter] { --font:"Special Elite","Miriam Libre","Courier New",monospace; --weight:400; --ls:0; --lh:1.25; --size:.85; }
+  #stage[data-theme=typewriter] .w:lang(he) { font-weight:700; }
+  #stage[data-theme=script] { --font:"Pacifico","Playpen Sans Hebrew",var(--ui); --weight:400; --ls:0; --lh:1.35; --size:.92; }
+  #stage[data-theme=script] .w:lang(he) { font-weight:700; }
+  #stage[data-theme=deco]   { --font:"Limelight","Bellefair","Frank Ruhl Libre",serif; --weight:400; --case:uppercase; --ls:.05em; --lh:1.25; --size:.88; }
+  #stage[data-theme=thin]   { --font:"Poiret One","Assistant",var(--ui); --weight:400; --case:uppercase; --ls:.16em; --lh:1.3; --size:.88; }
+  #stage[data-theme=thin] .w:lang(he) { font-weight:300; }
+  #stage[data-theme=classic]{ --font:"Bellefair","Frank Ruhl Libre",Georgia,serif; --weight:400; --case:uppercase; --ls:.14em; --lh:1.3; --size:.86; }
+
+  .measure, .measure * { animation:none !important; }      /* sized at rest, before any move starts */
+  /* ----- ways in. --i: word number, --ci: letter number, --st: delay between words ----- */
+  #stage .lyric.in .w, #stage .lyric.in .c { animation-fill-mode:both; animation-delay:calc(var(--i,0) * var(--st,60ms)); }
+  #stage .lyric.in .c { animation-delay:calc(var(--ci,0) * var(--cst,26ms)); }
+  .fx-rise .w  { animation:rise .75s cubic-bezier(.2,.9,.25,1); }
+  @keyframes rise { 0%{opacity:0; transform:translateY(.6em) scale(.95)} 100%{opacity:1; transform:none} }
+  .fx-pop .w   { animation:pop .62s cubic-bezier(.3,1.7,.45,1); }
+  @keyframes pop { 0%{opacity:0; transform:scale(.15) rotate(var(--r,0deg))} 60%{opacity:1} 100%{opacity:1; transform:none} }
+  .fx-drop .w  { animation:drop .8s cubic-bezier(.3,1.25,.45,1); }
+  @keyframes drop { 0%{opacity:0; transform:translateY(-1.5em) rotate(var(--r,0deg))} 55%{opacity:1; transform:translateY(.12em) rotate(calc(var(--r,0deg) * -.25))} 100%{opacity:1; transform:none} }
+  .fx-slam .w  { animation:slam .5s cubic-bezier(.15,.85,.25,1); }
+  @keyframes slam { 0%{opacity:0; transform:scale(3.2)} 70%{opacity:1; transform:scale(.94)} 100%{opacity:1; transform:none} }
+  .fx-slam .mover, .fx-stamp .mover { will-change:transform; animation:creep var(--dur,6s) linear both, shake .45s .2s linear; animation-composition:add; }
+  @keyframes shake { 0%,100%{translate:0 0} 20%{translate:-.7vw .3vw} 40%{translate:.6vw -.4vw} 60%{translate:-.4vw -.2vw} 80%{translate:.3vw .2vw} }
+  .fx-stamp .w { animation:stamp .42s cubic-bezier(.2,1.5,.4,1); }
+  @keyframes stamp { 0%{opacity:0; transform:scale(1.9) rotate(var(--r,0deg))} 100%{opacity:1; transform:none} }
+  .fx-slide .w { animation:slide .7s cubic-bezier(.16,1,.3,1); }
+  @keyframes slide { 0%{opacity:0; transform:translateX(calc(var(--side,1) * 38vw)) skewX(calc(var(--side,1) * -18deg))} 100%{opacity:1; transform:none} }
+  .fx-flip .w  { animation:flip .8s cubic-bezier(.2,.9,.3,1.2); transform-origin:50% 100%; }
+  @keyframes flip { 0%{opacity:0; transform:rotateX(-95deg) translateY(.3em)} 100%{opacity:1; transform:none} }
+  .fx-spin .w  { animation:spin .75s cubic-bezier(.2,1.3,.4,1); }
+  @keyframes spin { 0%{opacity:0; transform:rotate(calc(var(--side,1) * 70deg)) scale(.3) translateY(.6em)} 100%{opacity:1; transform:none} }
+  .fx-glitch .w { animation:glitch .55s steps(1,end); }
+  @keyframes glitch {
+    0%{opacity:0; transform:translate(-.4em,0) skewX(30deg)} 15%{opacity:1; transform:translate(.25em,-.08em) skewX(-20deg); text-shadow:-.1em 0 #f0f, .1em 0 #0ff}
+    30%{opacity:.3; transform:translate(-.12em,.06em)} 45%{opacity:1; transform:translate(.08em,0) skewX(12deg); text-shadow:.08em 0 #f0f, -.08em 0 #0ff}
+    60%{opacity:.6; transform:translate(-.04em,-.03em)} 80%{opacity:1; transform:none; text-shadow:-.03em 0 #f0f, .03em 0 #0ff} 100%{opacity:1; transform:none} }
+  .fx-track .text { animation:track 1.25s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes track { 0%{opacity:0; transform:scaleX(1.55)} 100%{opacity:1; transform:none} }
+  .fx-zoom .text { animation:zoom 1.1s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes zoom { 0%{opacity:0; transform:scale(.45)} 100%{opacity:1; transform:none} }
+  .fx-type .c  { animation:type .12s steps(1,end); }
+  @keyframes type { 0%{opacity:0} 100%{opacity:1} }
+  .fx-wave .c  { animation:wavein .7s cubic-bezier(.3,1.5,.45,1); }
+  @keyframes wavein { 0%{opacity:0; transform:translateY(.9em) scale(.6)} 100%{opacity:1; transform:none} }
+  .fx-swing .w { animation:swing .9s cubic-bezier(.3,1.4,.5,1); transform-origin:50% 0; }
+  @keyframes swing { 0%{opacity:0; transform:translateY(-.7em) rotate(calc(var(--side,1) * 28deg))} 55%{opacity:1; transform:rotate(calc(var(--side,1) * -7deg))} 100%{opacity:1; transform:none} }
+  .fx-stretch .w { animation:stretch .6s cubic-bezier(.3,1.5,.5,1); transform-origin:50% 100%; }
+  @keyframes stretch { 0%{opacity:0; transform:scale(1.3,0)} 60%{opacity:1; transform:scale(.92,1.2)} 100%{opacity:1; transform:none} }
+  .fx-scatter .w { animation:scatter .8s cubic-bezier(.16,1,.3,1); }
+  @keyframes scatter { 0%{opacity:0; transform:translate(calc(var(--side,1) * var(--amp,1) * 4em), calc((var(--amp,1) - 1) * 7em)) rotate(calc(var(--r,0deg) * 3)) scale(.4)} 100%{opacity:1; transform:none} }
+  .fx-roll .w { animation:roll .8s cubic-bezier(.2,1,.3,1); }
+  @keyframes roll { 0%{opacity:0; transform:translateX(calc(var(--side,1) * -2.2em)) rotate(calc(var(--side,1) * -200deg)) scale(.6)} 100%{opacity:1; transform:none} }
+  .fx-fade .text { animation:fadein .9s ease both; }
+  @keyframes fadein { 0%{opacity:0; transform:translateY(.25em)} 100%{opacity:1; transform:none} }
+
+  /* ----- staying alive once the line is in ----- */
+  .idle-bob .w   { animation:bob 2.6s ease-in-out infinite; animation-delay:calc(var(--i,0) * -.33s); }
+  @keyframes bob { 0%,100%{transform:translateY(0) rotate(0)} 50%{transform:translateY(-.09em) rotate(calc(var(--side,1) * 1.2deg))} }
+  .idle-sway .text { animation:sway 9s ease-in-out infinite; }
+  @keyframes sway { 0%,100%{transform:none} 25%{transform:rotate(1.3deg) translateX(.6vw)} 75%{transform:rotate(-1.3deg) translateX(-.6vw)} }
+  .idle-float .text { animation:float 9s ease-in-out infinite; }
+  @keyframes float { 0%,100%{transform:none} 25%{transform:translateY(-.12em)} 75%{transform:translateY(.12em)} }
+  .idle-wave .c  { animation:wave 1.9s ease-in-out infinite; animation-delay:calc(var(--ci,0) * -.09s); }
+  @keyframes wave { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-.11em)} }
+  .idle-drift .w { animation:drift-w 4.2s ease-in-out infinite; animation-delay:calc(var(--i,0) * -.7s); }
+  @keyframes drift-w { 0%,100%{transform:none} 50%{transform:translateY(calc(var(--side,1) * .05em)) scale(1.025)} }
+
+  /* ----- ways out ----- */
+  .lyric.out { transition:opacity .4s ease, transform .5s cubic-bezier(.4,0,.8,.4); opacity:0; will-change:transform, opacity; }
+  .out-up   { transform:translateY(-9vh) scale(.96); }
+  .out-zoom { transform:scale(1.35); }
+  .out-fall { transform:translateY(14vh) rotate(5deg); }
+  .out-side { transform:translateX(-24vw) skewX(14deg); }
+  .out-back { transform:scale(.6); }
+
+  /* intro / instrumental break: an equaliser that moves with the music */
+  @property --lv { syntax:"<number>"; inherits:false; initial-value:.5; }
+  .break { display:flex; align-items:center; justify-content:center; height:34vh; animation:fadein .9s ease both; scale:1.55; }
+  .break .hit { transform:scale(calc(1 + var(--k,.12) * var(--beat))); transition:transform .14s ease-out; display:flex; align-items:center; justify-content:center; }
+  /* bars: a mirrored equaliser */
+  .b-bars { gap:1.2vh; }
+  .b-bars i { width:1.5vh; height:100%; border-radius:1vh; background:linear-gradient(rgb(var(--accent)), #fff 50%, rgb(var(--accent)));
+    transform:scaleY(calc(.08 + var(--h,.5) * (.5 + .5 * var(--beat)))); transition:transform .14s ease-out; animation:barlive 1.3s ease-in-out infinite alternate; animation-delay:calc(var(--n) * -.37s); }
+  @keyframes barlive { 0%{scale:1 .65} 100%{scale:1 1.15} }
+  /* blocks: a chunky level meter */
+  .b-blocks { gap:1.4vh; align-items:flex-end; }
+  .b-blocks i { width:4.2vh; height:100%; animation:lvl 1.1s ease-in-out infinite alternate; animation-delay:calc(var(--n) * -.43s);
+    background:repeating-linear-gradient(0deg, transparent 0 .8vh, #000 0) , linear-gradient(0deg, rgb(var(--accent)) 55%, #fff 80%, #ff4d5e);
+    -webkit-mask-image:repeating-linear-gradient(0deg, transparent 0 .9vh, #000 .9vh 4.25vh); mask-image:repeating-linear-gradient(0deg, transparent 0 .9vh, #000 .9vh 4.25vh);
+    clip-path:inset(calc((1 - var(--h,.6) * (.3 + .4 * var(--lv) + .3 * var(--beat))) * 100%) 0 0 0); transition:clip-path .12s linear; }
+  .b-blocks i { background:linear-gradient(0deg, rgb(var(--accent)) 55%, #fff 80%, #ff4d5e); }
+  @keyframes lvl { 0%{--lv:.1} 100%{--lv:1} }
+  /* vinyl: the record spins, the sleeve art on its label */
+  .b-vinyl .disc { width:34vh; height:34vh; border-radius:50%; animation:turn 3.4s linear infinite; position:relative;
+    background:radial-gradient(circle, transparent 0 19%, #0b0b0e 19.5% 21%, transparent 21.5%), repeating-radial-gradient(circle, #15151a 0 .35vh, #08080b .35vh .7vh);
+    box-shadow:0 0 0 .35vh #000, 0 1.5vh 5vh #000a, 0 0 6vh rgba(var(--accent),.45); }
+  .b-vinyl .disc::before { content:""; position:absolute; inset:31%; border-radius:50%; background:rgb(var(--accent)) var(--art, none) center/cover; }
+  .b-vinyl .disc::after { content:""; position:absolute; inset:0; border-radius:50%;
+    background:conic-gradient(from 20deg, transparent 0 8%, rgba(255,255,255,.14) 12%, transparent 17% 50%, rgba(255,255,255,.1) 56%, transparent 62%),
+               radial-gradient(circle, #08080b 0 2.2%, transparent 2.6%); }
+  @keyframes turn { to { transform:rotate(360deg) } }
+  /* rings: neon ripples around a core */
+  .b-rings .hit { width:30vh; height:30vh; position:relative; --k:.35; }
+  .b-rings .core { width:6vh; height:6vh; border-radius:50%; background:#fff; box-shadow:0 0 3vh rgb(var(--accent)), 0 0 7vh rgb(var(--accent)); }
+  .b-rings i { position:absolute; inset:0; border-radius:50%; border:.45vh solid rgb(var(--accent)); box-shadow:0 0 2vh rgba(var(--accent),.8), inset 0 0 2vh rgba(var(--accent),.5);
+    animation:ripple 2.4s cubic-bezier(.2,.6,.4,1) infinite; animation-delay:calc(var(--n) * -.8s); }
+  @keyframes ripple { 0%{transform:scale(.18); opacity:0} 15%{opacity:1} 100%{transform:scale(1.15); opacity:0} }
+  /* dots: bouncing balls */
+  .b-dots .hit { gap:2.6vh; --k:.18; height:22vh; align-items:flex-end; }
+  .b-dots i { width:5vh; height:5vh; border-radius:50%; background:#fff; animation:bounce .62s cubic-bezier(.3,0,.7,1) infinite alternate; animation-delay:calc(var(--n) * -.19s); }
+  .b-dots i:nth-child(2n) { background:rgb(var(--accent)); }
+  @keyframes bounce { 0%{transform:translateY(0) scale(1.2,.8)} 25%{transform:translateY(-3vh) scale(.95,1.05)} 100%{transform:translateY(-15vh) scale(1)} }
+  /* wave: slow flowing lines */
+  .b-wave .hit { width:80vh; height:24vh; overflow:hidden; --k:0; transform:scaleY(calc(.75 + .5 * var(--beat))); transition:transform .25s ease-out;
+    -webkit-mask-image:linear-gradient(90deg, transparent, #000 22% 78%, transparent); mask-image:linear-gradient(90deg, transparent, #000 22% 78%, transparent); }
+  .b-wave svg { width:200%; height:100%; flex:none; align-self:stretch; margin-right:-100%; animation:flow 4s linear infinite; }
+  .b-wave path { fill:none; stroke:#fff; stroke-width:3; vector-effect:non-scaling-stroke; }
+  .b-wave path:nth-child(2) { stroke:rgb(var(--accent)); stroke-width:5; } .b-wave path:nth-child(3) { opacity:.4; }
+  @keyframes flow { to { transform:translateX(-50%) } }
+  /* notes: music notes drifting up */
+  .b-notes .hit { gap:3.5vh; --k:.1; font:400 13vh/1 "DejaVu Sans","Noto Sans Symbols2","Segoe UI Symbol",sans-serif; }
+  .b-notes i { font-style:normal; color:#fff; text-shadow:0 0 2.5vh rgba(var(--accent),.9); animation:note 2.6s ease-in-out infinite; animation-delay:calc(var(--n) * -.55s); }
+  .b-notes i:nth-child(2n) { color:rgb(var(--accent)); font-size:.75em; }
+  @keyframes note { 0%,100%{transform:translateY(2.5vh) rotate(-9deg)} 50%{transform:translateY(-2.5vh) rotate(9deg)} }
+  /* pulse: a heartbeat trace */
+  .b-pulse .hit { width:80vh; height:26vh; --k:0; transform:scaleY(calc(.75 + .5 * var(--beat))); transition:transform .12s ease-out; }
+  .b-pulse svg { width:100%; height:100%; overflow:visible; animation:scan 2.4s linear infinite;
+    -webkit-mask:linear-gradient(90deg, #000 0 42%, transparent 58%) 100% 0 / 260% 100% no-repeat; mask:linear-gradient(90deg, #000 0 42%, transparent 58%) 100% 0 / 260% 100% no-repeat; }
+  .b-pulse polyline { fill:none; stroke-linejoin:round; stroke-linecap:round; vector-effect:non-scaling-stroke; }
+  .b-pulse polyline:nth-child(1) { stroke:rgb(var(--accent)); stroke-width:16; opacity:.45; } .b-pulse polyline:nth-child(2) { stroke:#fff; stroke-width:6; }
+  @keyframes scan { 0%{-webkit-mask-position:100% 0; mask-position:100% 0; opacity:1} 70%{-webkit-mask-position:0 0; mask-position:0 0; opacity:1} 100%{-webkit-mask-position:0 0; mask-position:0 0; opacity:0} }
+  .lite .b-rings i, .lite .b-rings .core, .lite .b-vinyl .disc { box-shadow:none; }
+  .lite .b-notes i { text-shadow:none; }
+
+  .dots { display:inline-flex; gap:.55em; height:1.2em; align-items:center; }
+  .dots i { width:.3em; height:.3em; border-radius:50%; background:#fff; opacity:.35; animation:breathe 1.6s ease-in-out infinite; }
+  .dots i:nth-child(2) { animation-delay:.2s; } .dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes breathe { 0%,100%{opacity:.25;transform:scale(.8)} 50%{opacity:.9;transform:scale(1.15)} }
+
+  /* ---------- song: "now playing" card (also the no-lyrics view) ---------- */
+  #card { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1.5rem;
+    text-align:center; padding:0 6vw; transition:opacity .6s ease, transform .7s cubic-bezier(.22,1,.36,1), filter .6s ease; }
+  #card img { width:min(40vh,340px); aspect-ratio:1; border-radius:14px; object-fit:cover;
+    box-shadow:0 18px 60px #000c, 0 0 70px rgba(var(--accent),.35);
+    transform:scale(calc(1 + .025 * var(--beat))); transition:transform .12s linear; }
+  #card .t { font-size:clamp(1.7rem,4.2vw,3.4rem); font-weight:800; letter-spacing:-.01em; }
+  #card .a { font-size:clamp(1rem,2vw,1.6rem); color:rgba(255,255,255,.62); }
+  #card .n { font-size:.95rem; color:var(--dim); letter-spacing:.1em; text-transform:uppercase; min-height:1.4em; }
+  #song.enter #card { animation:cardin .8s cubic-bezier(.22,1,.36,1); }
+  @keyframes cardin { 0%{opacity:0; transform:scale(.92) translateY(14px)} 100%{opacity:1; transform:none} }
+  /* which of the two is showing */
+  #song.card  header, #song.card  #stage, #song.card #progress { opacity:0; }
+  #song.card  header { transform:translateY(-12px); }
+  #song.words #card { opacity:0; transform:scale(.9) translateY(-6vh); pointer-events:none; }
+
+  #progress { position:absolute; left:0; bottom:0; height:3px; width:100%; transform:scaleX(0); transform-origin:0 50%; transition:opacity .6s;
+    background:linear-gradient(90deg, rgba(var(--accent),.2), rgb(var(--accent))); box-shadow:0 0 12px rgba(var(--accent),.8); }
+
+  /* ---------- light mode: switched on by itself when the machine can't keep the frame rate (no graphics card) ---------- */
+  .lite #bg { animation:none; filter:none; opacity:0 !important; }
+  .lite #glow i { background:radial-gradient(70% 65% at 50% 55%, rgba(var(--accent),.4), transparent 72%); }
+  .lite .mover { animation-name:none; will-change:auto; }
+  .lite .w { will-change:auto; }
+  .lite #glow i { opacity:.8; will-change:auto; }
+  .lite .idle-bob .w, .lite .idle-wave .c { animation-duration:3.4s; }
+  .lite #progress { box-shadow:none; }
+  .lite .idle-float .text, .lite .idle-sway .text { will-change:transform; }
+  .lite #stage:not([data-hard]) { --shadow:0 .05em .12em rgba(0,0,0,.6) !important; }
+  .lite #stage[data-theme=rock] { --shadow:.045em .05em 0 rgba(var(--accent),.85) !important; }
+  .lite #stage[data-theme=neon] { --shadow:0 0 .18em rgb(var(--accent)) !important; }
+  .lite #stage[data-theme=neon] .text { animation:none; }
+  .lite #card img { box-shadow:0 10px 30px #000c; }
+  .lite .aurora i { animation-play-state:paused; will-change:auto; }
+  .lite #listening .pill b { animation:none; box-shadow:none; }
+
+  #hud { position:fixed; bottom:1rem; right:1.5rem; font-size:.9rem; color:var(--dim); opacity:0; transition:opacity .3s; }
+</style>
+</head>
+<body>
+<div id="bg"></div><div id="glow"><i></i></div><canvas id="fx"></canvas><div id="vignette"></div>
+
+<div id="listening" class="screen">
+  <div class="aurora"><i></i><i></i><i></i></div>
+  <canvas id="ring"></canvas>
+  <div class="cap"><div class="msg" id="lmsg">Listening</div><div class="pill"><b></b><span id="lsub">Play a song and the lyrics will appear</span></div></div>
+  <div class="brand">LIVE <em>LYRICS</em></div>
+  <div id="clock"></div>
+</div>
+
+<div id="song" class="screen hidden card">
+  <header><img id="cover" alt="" crossorigin="anonymous"><div><div><span id="title" dir="auto"></span><span id="badge">LIVE</span><span id="tr"></span></div><div id="artist" dir="auto"></div></div></header>
+  <div id="stage"></div>
+  <div id="card"><img id="bigcover" alt="" crossorigin="anonymous"><div class="t" dir="auto"></div><div class="a" dir="auto"></div><div class="n"></div></div>
+  <div id="progress"></div>
+</div>
+
+<div id="hud"></div>
+<script>
+const $ = id => document.getElementById(id);
+const FADE_MS = 500, CARD_MS = 1300;
+let state = {status: "listening"}, shown = {status: "listening"};
+let rows = [], srcToRow = [], activeKey = null, userOffset = 0, swapTimer = null, cardTimer = null, shownAt = 0;
+let beat = 0, beatTarget = 0, theme = null, lineNo = 0, current = null, accent = [124, 156, 255];
+try { userOffset = parseFloat(localStorage.getItem("offset")) || 0; } catch {}
+for (const id of ["cover", "bigcover"]) $(id).onerror = function () { this.style.display = "none"; };
+
+const isRTL = s => /[֐-ࣿיִ-﷿ﹰ-﻿]/.test(s);
+const isJoined = s => /[؀-ۿݐ-ݿऀ-෿฀-໿]/.test(s);      // scripts whose letters must not be pulled apart
+const isCJK = s => /[぀-ヿ㐀-鿿가-힯]/.test(s);
+const dotsEl = () => { const s = document.createElement("span"); s.className = "dots"; s.innerHTML = "<i></i><i></i><i></i>"; return s; };
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const hash = s => { let h = 2166136261; for (const ch of String(s)) h = Math.imul(h ^ ch.codePointAt(0), 16777619); return h >>> 0; };
+const el = (cls, parent) => { const d = document.createElement("div"); d.className = cls; if (parent) parent.appendChild(d); return d; };
+
+// ---- styles ----------------------------------------------------------------------
+// Each style: the ways a line may come in (cycled line by line), how it moves while it's up, how it leaves.
+const THEMES = {
+  pop:        {ins: ["pop", "drop", "wave", "spin", "rise"],        idle: "bob",   outs: ["zoom", "up"],   brk: "dots"},
+  bubble:     {ins: ["stretch", "pop", "roll", "drop", "wave"],     idle: "bob",   outs: ["up", "zoom"],   brk: "dots"},
+  comic:      {ins: ["slam", "scatter", "pop", "swing"],            idle: "drift", outs: ["fall", "zoom"], brk: "blocks", hard: 1},
+  marker:     {ins: ["type", "swing", "rise", "scatter"],           idle: "sway",  outs: ["up", "side"],   brk: "notes"},
+  rock:       {ins: ["slam", "slide", "stamp", "drop"],             idle: "drift", outs: ["fall", "zoom"], brk: "pulse", hard: 1},
+  grunge:     {ins: ["stamp", "scatter", "slam", "stretch"],        idle: "drift", outs: ["fall", "back"], brk: "pulse"},
+  poster:     {ins: ["stretch", "slide", "flip", "slam"],           idle: "drift", outs: ["side", "zoom"], brk: "bars"},
+  slab:       {ins: ["drop", "stamp", "swing", "rise"],             idle: "float", outs: ["fall", "up"],   brk: "vinyl"},
+  hiphop:     {ins: ["stamp", "slide", "slam", "pop"],              idle: "drift", outs: ["side", "back"], brk: "blocks"},
+  street:     {ins: ["scatter", "stamp", "roll", "slam"],           idle: "drift", outs: ["side", "fall"], brk: "blocks"},
+  bold:       {ins: ["slide", "stretch", "stamp", "flip"],          idle: "drift", outs: ["back", "side"], brk: "bars"},
+  neon:       {ins: ["glitch", "track", "flip", "zoom"],            idle: "drift", outs: ["zoom", "side"], brk: "rings"},
+  synth:      {ins: ["track", "glitch", "slide", "stretch"],        idle: "float", outs: ["side", "zoom"], brk: "rings", hard: 1},
+  glitch:     {ins: ["glitch", "scatter", "zoom", "flip"],          idle: "drift", outs: ["zoom", "back"], brk: "pulse"},
+  retro:      {ins: ["roll", "swing", "pop", "track"],              idle: "sway",  outs: ["zoom", "up"],   brk: "vinyl", hard: 1},
+  soul:       {ins: ["rise", "track", "zoom", "flip"],              idle: "float", outs: ["up", "back"],   brk: "vinyl"},
+  elegant:    {ins: ["track", "rise", "swing", "zoom"],             idle: "float", outs: ["up", "back"],   brk: "wave"},
+  velvet:     {ins: ["zoom", "rise", "flip", "stretch"],            idle: "float", outs: ["back", "up"],   brk: "vinyl"},
+  indie:      {ins: ["type", "rise", "wave", "drop"],               idle: "sway",  outs: ["up", "fall"],   brk: "notes"},
+  folk:       {ins: ["rise", "swing", "wave", "stretch"],           idle: "sway",  outs: ["up", "fall"],   brk: "notes"},
+  typewriter: {ins: ["type", "type", "rise", "type"],               idle: "float", outs: ["up", "back"],   brk: "bars"},
+  sun:        {ins: ["wave", "spin", "pop", "flip", "rise"],        idle: "sway",  outs: ["zoom", "up"],   brk: "dots", hard: 1},
+  script:     {ins: ["rise", "wave", "roll", "zoom"],               idle: "sway",  outs: ["up", "zoom"],   brk: "wave"},
+  classic:    {ins: ["track", "zoom", "rise"],                      idle: "float", outs: ["up", "back"],   brk: "wave"},
+  deco:       {ins: ["track", "flip", "zoom", "stretch"],           idle: "float", outs: ["back", "up"],   brk: "vinyl"},
+  thin:       {ins: ["track", "rise", "zoom", "swing"],             idle: "float", outs: ["up", "back"],   brk: "wave"},
+};
+// Each genre has several looks; the song decides which one it gets.
+const GENRES = [[/hip|rap|trap|grime|drill/, ["hiphop", "street", "bold", "comic"]], [/metal|punk|rock|grunge|hard/, ["rock", "grunge", "poster", "slab", "marker"]],
+  [/danc|electr|house|techno|edm|trance|disco|drum|dubstep|garage/, ["neon", "synth", "glitch", "retro", "bold"]],
+  [/r&b|soul|funk|gospel|blues|ballad/, ["soul", "velvet", "elegant", "retro", "slab"]],
+  [/altern|indie|folk|singer|songwriter|country|americana|acoustic/, ["indie", "folk", "typewriter", "marker", "slab", "poster"]],
+  [/latin|reggae|afro|urbano|brazil|salsa|caribbean|mizrahi|mediterr/, ["sun", "script", "bubble", "retro"]],
+  [/jazz|classical|soundtrack|opera|vocal|easy|instrumental|new age/, ["classic", "deco", "elegant", "thin", "velvet"]],
+  [/pop|k-pop|j-pop/, ["pop", "bubble", "comic", "marker", "retro", "poster"]]];
+
+// The picture shown while nobody sings (intro, instrumental break). Each look has its own.
+function breakEl(kind, cover) {
+  const b = document.createElement("div"); b.className = "break b-" + kind;
+  const many = (n, f = () => "") => Array.from({length: n}, (_, k) => `<i style="--n:${k};${f(k)}"></i>`).join("");
+  const arch = n => k => `--h:${(.35 + .65 * Math.sin(Math.PI * (k + .5) / n)).toFixed(2)}`;
+  if (kind === "bars") b.innerHTML = many(11, arch(11));
+  else if (kind === "blocks") b.innerHTML = many(7, arch(7));
+  else if (kind === "vinyl") { b.innerHTML = `<div class="hit" style="--k:.06"><div class="disc"></div></div>`; if (cover) b.querySelector(".disc").style.setProperty("--art", `url("${cover}")`); }
+  else if (kind === "rings") b.innerHTML = `<div class="hit">${many(3)}<div class="core"></div></div>`;
+  else if (kind === "dots") b.innerHTML = `<div class="hit">${many(5)}</div>`;
+  else if (kind === "notes") b.innerHTML = `<div class="hit">${["♪", "♫", "♩", "♬", "♪"].map((c, k) => `<i style="--n:${k}">${c}</i>`).join("")}</div>`;
+  else if (kind === "wave") {
+    const path = (amp, ph) => { let d = ""; for (let x = 0; x <= 400; x += 5) d += `${x ? "L" : "M"}${x} ${(50 + amp * Math.sin(x / 200 * 2 * Math.PI * 2 + ph)).toFixed(1)}`; return `<path d="${d}"/>`; };
+    b.innerHTML = `<div class="hit"><svg viewBox="0 0 400 100" preserveAspectRatio="none" style="margin-left:0">${path(34, 0)}${path(22, 1.3)}${path(40, 2.6)}</svg></div>`;
+  } else {  // pulse
+    const pts = "0,50 22,50 27,38 32,50 40,50 45,62 50,8 56,92 61,50 70,50 76,34 84,50 100,50";
+    b.innerHTML = `<div class="hit"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}"/><polyline points="${pts}"/></svg></div>`;
+  }
+  return b;
+}
+
+function pickTheme(st) {
+  const g = (st.genre || "").toLowerCase(), h = hash(st.key || st.title);
+  const hit = GENRES.find(([re]) => re.test(g)), pool = hit ? hit[1] : Object.keys(THEMES);     // unknown genre: any look
+  const name = THEMES[window.FORCE_THEME] ? window.FORCE_THEME : pool[h % pool.length], t = THEMES[name], turn = (h >>> 8) % t.ins.length;
+  return {name, ...t, ins: t.ins.map((_, i) => t.ins[(i + turn) % t.ins.length]), seed: h};         // same look, different opening move per song
+}
+
+// ---- accent colour from the cover art ---------------------------------------
+function applyAccent(rgb) { accent = rgb; document.documentElement.style.setProperty("--accent", rgb.join(",")); }
+function setAccent(img) {
+  let rgb = [124, 156, 255];
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 24;
+    const g = c.getContext("2d"); g.drawImage(img, 0, 0, 24, 24);
+    const d = g.getImageData(0, 0, 24, 24).data; let best = -1;
+    for (let i = 0; i < d.length; i += 4) {             // most vivid pixel wins
+      const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+      const score = (mx - mn) * (mx > 60 ? 1 : .3);
+      if (score > best) { best = score; const k = 235 / Math.max(mx, 1); rgb = [r, gg, b].map(v => Math.round(Math.min(255, v * k * .85 + 38))); }
+    }
+    if (best < 25) rgb = [200, 205, 225];               // greyscale cover: neutral glow
+  } catch {}
+  applyAccent(rgb);
+}
+$("bigcover").onload = function () { setAccent(this); };
+
+// ---- screens ------------------------------------------------------------------
+function show(id) { for (const s of ["listening", "song"]) $(s).classList.toggle("hidden", s !== id); }
+
+function setHearing(on) {
+  on = !!on;
+  const L = $("listening"), m = $("lmsg");
+  if (L.classList.contains("hearing") === on && m.textContent) return;
+  L.classList.toggle("hearing", on);
+  m.textContent = on ? "Catching the song" : "Listening";
+  m.classList.remove("swap"); void m.offsetWidth; m.classList.add("swap");
+  $("lsub").textContent = on ? "Music detected · lyrics coming up" : "Play a song and the lyrics will appear";
+}
+
+function hasLyrics(st) {
+  const l = st.lyrics;
+  return !!(l && ((l.synced && l.synced.some(x => x.text)) || (l.plain && l.plain.some(x => x))));
+}
+
+// The lyric rows: {t (start, synced only), text | dots, src, group (unsynced: which verse block)}
+function buildLyrics(st) {
+  for (const old of $("stage").querySelectorAll(".lyric")) old.remove();
+  rows = []; srcToRow = []; activeKey = null; current = null; lineNo = 0;
+  theme = pickTheme(st); $("stage").dataset.theme = theme.name;
+  if (theme.hard) $("stage").dataset.hard = "1"; else delete $("stage").dataset.hard;
+  if (!hasLyrics(st)) return;
+  const lyr = st.lyrics;
+  if (lyr.synced) {
+    const L = lyr.synced;
+    rows.push({t: -Infinity, dots: true, src: -1});                       // intro
+    L.forEach((l, i) => {
+      srcToRow[i] = rows.length;
+      if (!l.text) { rows.push({t: l.t, dots: true, src: i}); return; }
+      rows.push({t: l.t, text: l.text, src: i});
+      // A long wait before the next line is an instrumental break
+      const next = i + 1 < L.length ? L[i + 1].t : l.t + 5, n = l.text.split(/\s+/).length;
+      const sung = clamp(.3 * n + .06 * l.text.length + .4, 1.2, 14);
+      if (next - l.t - sung > 9 && i + 1 < L.length && L[i + 1].text) rows.push({t: l.t + sung + .6, dots: true, src: i});
+    });
+  } else {
+    let group = 0, inGroup = 0;
+    lyr.plain.forEach((t, i) => {
+      srcToRow[i] = rows.length;
+      if (!t || inGroup >= 3) { group++; inGroup = 0; }
+      if (t) inGroup++;
+      rows.push({text: t || null, src: i, group});
+    });
+  }
+}
+
+function buildSong(st) {
+  $("title").textContent = st.title; $("artist").textContent = st.artist;
+  $("card").querySelector(".t").textContent = st.title; $("card").querySelector(".a").textContent = st.artist;
+  for (const id of ["cover", "bigcover"]) { $(id).style.display = st.cover ? "block" : "none"; if (st.cover && $(id).src !== st.cover) $(id).src = st.cover; }
+  if (st.cover) { $("bg").style.backgroundImage = `url("${st.cover}")`; if ($("bigcover").complete && $("bigcover").naturalWidth) setAccent($("bigcover")); }
+  else applyAccent([124, 156, 255]);
+  $("bg").classList.toggle("on", !!st.cover); $("glow").classList.add("on");
+  $("badge").style.display = st.mode === "live" ? "inline-block" : "none";
+  buildLyrics(st); setCardNote(st);
+}
+
+const LANG = {en: "English", he: "עברית", es: "Español"};
+function setCardNote(st) {
+  $("tr").style.display = st.translated ? "inline-block" : "none"; $("tr").textContent = st.translated ? `Translated · ${LANG[st.translated] || st.translated}` : "";
+  const n = $("card").querySelector(".n"); n.textContent = "";
+  if (st.loading) n.appendChild(dotsEl()); else if (!hasLyrics(st)) n.textContent = "Lyrics not available";
+}
+
+// The card shows first ("now playing"), then gives way to the lyrics once they're there.
+function settleCard() {
+  clearTimeout(cardTimer);
+  const st = shown; if (st.status !== "playing") return;
+  const wait = CARD_MS - (performance.now() - shownAt);
+  const go = () => { if (shown.key === st.key && hasLyrics(shown)) { $("song").classList.remove("card"); $("song").classList.add("words"); activeKey = null; } };
+  if (!hasLyrics(st)) { $("song").classList.add("card"); $("song").classList.remove("words"); return; }
+  if (wait > 0) cardTimer = setTimeout(go, wait); else go();
+}
+
+// Fade out whatever is on screen, swap content while invisible, fade back in.
+function transition(next) {
+  clearTimeout(swapTimer); clearTimeout(cardTimer);
+  $(shown.status === "playing" ? "song" : "listening").classList.add("hidden");
+  if (next.status !== "playing") { $("bg").classList.remove("on"); $("glow").classList.remove("on"); }
+  swapTimer = setTimeout(() => {
+    shown = state;                               // (the newest state: more may have arrived during the fade)
+    if (shown.status === "playing") {
+      const s = $("song"); s.classList.remove("words", "enter"); s.classList.add("card");
+      buildSong(shown); void s.offsetWidth; s.classList.add("enter");
+      shownAt = performance.now(); show("song"); settleCard();
+    } else { setHearing(shown.hearing); show("listening"); }
+  }, FADE_MS);
+}
+
+// ---- where are we? --------------------------------------------------------------
+function songPos(st = state) { return st.pos + (Date.now() / 1000 - st.wall) + userOffset; }
+// The lyrics' own clock: the server measures whether this lyric file runs early/late.
+function lyricPos(st = state) { return songPos(st) - (st.offset || 0); }
+
+function rowAt(t) { let i = 0; for (let k = 0; k < rows.length && rows[k].t <= t; k++) i = k; return i; }
+function textRows() { return rows.map((r, i) => r.text ? i : -1).filter(i => i >= 0); }
+
+// Returns the row that is being sung; sets `soft` when it's only an estimate.
+let soft = false;
+function currentRow(st = state) {
+  soft = false;
+  if (!rows.length) return null;
+  const lyr = st.lyrics, synced = !!lyr.synced;
+  if (synced) {
+    if (st.mode !== "live") return rowAt(lyricPos(st));
+    // Live band: the server says which line was just heard. We may run ahead on the recording's
+    // timing, but never more than one line past what was actually sung.
+    if (st.line == null) return 0;
+    const heard = srcToRow[st.line] ?? 0;
+    if (st.pos == null) return heard;
+    return clamp(rowAt(lyricPos(st)), heard, Math.min(rows.length - 1, heard + 1));
+  }
+  // Unsynced lyrics: follow where the singer was last heard; otherwise estimate from song progress.
+  const anchorAt = st.mode === "live" ? st.wall : st.line_wall;
+  if (st.line != null && anchorAt && Date.now() / 1000 - anchorAt < 20) return srcToRow[st.line] ?? 0;
+  if (st.mode === "live") return st.line != null ? (srcToRow[st.line] ?? 0) : 0;
+  const dur = lyr.track_duration || lyr.duration, tr = textRows();
+  soft = true;
+  if (!dur || st.pos == null || !tr.length) return tr[0] ?? 0;
+  const f = clamp((songPos(st) / dur - .08) / .84, 0, .999);       // vocals rarely fill the first/last few %
+  return tr[Math.floor(f * tr.length)];
+}
+
+// ---- putting a line on screen ------------------------------------------------------
+function fillWords(box, text, chars, start) {
+  const rtl = isRTL(text);
+  let parts = text.split(/\s+/).filter(Boolean);
+  if (parts.length === 1 && isCJK(text) && text.length > 6) parts = [...text];
+  // the line's stand-out word: its longest (never in the first style-less, calm view)
+  let em = -1; if (parts.length > 2) parts.forEach((w, k) => { if (w.replace(/[^\p{L}]/gu, "").length > (em < 0 ? 3 : parts[em].length)) em = k; });
+  let ci = start.c;
+  parts.forEach((w, k) => {
+    const s = document.createElement("span"); s.className = "w" + (k === em ? " em" : "");
+    const i = start.w + k, r = hash(w + i);
+    s.style.setProperty("--i", i); s.style.setProperty("--side", i % 2 ? 1 : -1);
+    s.style.setProperty("--r", `${(r % 31) - 15}deg`); s.style.setProperty("--amp", (.5 + (r % 100) / 100).toFixed(2));
+    if (isRTL(w)) s.lang = "he";
+    if (chars) {
+      s.dir = isRTL(w) ? "rtl" : "ltr";
+      for (const ch of w) { const c = document.createElement("span"); c.className = "c"; c.textContent = ch; c.style.setProperty("--ci", ci++); s.appendChild(c); }
+    } else s.textContent = w;
+    box.appendChild(s); box.appendChild(document.createTextNode(" "));
+  });
+  box.dir = rtl ? "rtl" : "ltr";
+  start.w += parts.length; start.c = ci + 1;
+}
+
+// As big as the stage allows: short lines fill the screen, long ones still fit.
+function fit(text, scale) {
+  const stage = $("stage"), maxW = innerWidth * .86, maxH = stage.clientHeight * .9;
+  let fs = Math.min(innerWidth * .17, stage.clientHeight * .42) * scale;
+  for (let k = 0; k < 30; k++) {
+    text.style.fontSize = fs + "px";
+    if (text.scrollWidth <= maxW + 1 && text.offsetHeight <= maxH) break;
+    fs *= .92;
+  }
+}
+
+function leave(node) {
+  if (!node) return;
+  const outs = theme ? theme.outs : ["up"];
+  node.classList.remove("in"); node.classList.add("out", "out-" + outs[lineNo % outs.length]);
+  setTimeout(() => node.remove(), 550);
+}
+
+function place(i) {
+  const row = rows[i]; if (!row) return;
+  leave(current); current = null;
+  if (!row.text && !row.dots) return;                       // a blank between verses
+  const node = el("lyric"), pulse = el("pulse", node), mover = el("mover", pulse);
+  if (row.dots) mover.appendChild(breakEl(theme.brk, shown.cover));
+  else {
+    const group = soft ? rows.filter(r => r.text && r.group === row.group) : [row];
+    if (!group.length) { return; }
+    const calm = soft;                            // only an estimate of where the song is: a quiet verse, no fireworks
+    let fx = calm ? "fade" : theme.ins[lineNo % theme.ins.length];
+    const whole = group.map(r => r.text).join(" ");
+    const letters = (fx === "type" || fx === "wave") && !isJoined(whole);
+    if ((fx === "type" || fx === "wave") && !letters) fx = "rise";
+    const text = el("text", mover), count = {w: 0, c: 0};
+    for (const r of group) fillWords(el("row", text), r.text, letters, count);
+    node.classList.add("fx-" + fx); if (calm) node.classList.add("calm");
+    // long lines ripple faster, so the whole line is up within about half a second
+    node.style.setProperty("--st", `${Math.round(clamp(560 / count.w, 26, fx === "stamp" || fx === "slam" ? 130 : 85))}ms`);
+    node.style.setProperty("--cst", `${Math.round(clamp(700 / count.c, 9, 38))}ms`);
+    const next = rows[i + 1], dur = row.t > -Infinity && next && next.t ? clamp(next.t - row.t, 2.5, 14) : 7;
+    node.style.setProperty("--dur", `${dur.toFixed(1)}s`);
+    node.style.visibility = "hidden"; node.classList.add("measure"); $("stage").appendChild(node);
+    fit(text, calm ? .5 : parseFloat(getComputedStyle($("stage")).getPropertyValue("--size")) || 1);
+    node.classList.remove("measure"); node.style.visibility = "";
+    if (!calm) {                                   // once it has landed, hand over to the style's own motion
+      const idle = lite ? (theme.idle === "sway" ? "sway" : "float") : fx === "wave" ? "wave" : theme.idle, me = node;   // light mode: the line moves as one piece
+      const landed = (letters ? count.c * parseFloat(node.style.getPropertyValue("--cst")) : count.w * parseFloat(node.style.getPropertyValue("--st"))) + 900;
+      setTimeout(() => { if (current === me) { me.classList.remove("in", "fx-" + fx); me.classList.add("idle-" + idle); } }, landed);
+    }
+  }
+  if (!node.parentNode) $("stage").appendChild(node);
+  node.classList.add("in"); current = node; lineNo++;
+}
+
+// ---- the orb (listening) and floating lights (song) -----------------------------------
+const cv = $("fx"), g2 = cv.getContext("2d");
+let W = 0, H = 0, orb = 0, orbTarget = 1, energy = 0, flow = 0, ringFlow = 0;
+const rc = $("ring"), r2 = rc.getContext("2d"); let RS = 0;
+function resize() { W = cv.width = Math.ceil(innerWidth / 3); H = cv.height = Math.ceil(innerHeight / 3); RS = rc.width = rc.height = Math.round(Math.min(innerWidth, innerHeight) * .64); }
+function tickClock() { const d = new Date(); $("clock").textContent = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
+tickClock(); setInterval(tickClock, 5000);
+addEventListener("resize", resize); resize();
+const lights = Array.from({length: 26}, (_, k) => ({x: Math.random(), y: Math.random(), r: .006 + Math.random() * .02, v: .008 + Math.random() * .03, p: Math.random() * 7, k}));
+function hsl(h, s, l) { const a = s * Math.min(l, 1 - l), f = n => { const k = (n + h / 30) % 12; return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); }; return [f(0), f(8), f(4)]; }
+
+// The ring around the orb: a circle of bars that breathes when the room is quiet and dances when it hears music.
+let ringDrawn = false;
+function drawRing(t, hue, hearing) {
+  const S = RS, c = S / 2, Rb = S * .285, N = 96;
+  r2.clearRect(0, 0, S, S); ringDrawn = true;
+  r2.lineCap = "round"; r2.lineWidth = Math.max(2, S * .0075);
+  for (let k = 0; k < N; k++) {
+    const m = k < N / 2 ? k : N - k, a = (k / N) * 6.2832 - 1.5708;            // mirrored left/right
+    const n1 = .5 + .5 * Math.sin(m * .42 + flow * 1.1), n2 = .5 + .5 * Math.sin(m * 1.31 - flow * 2.3), n3 = .5 + .5 * Math.sin(m * .17 + flow * .5);
+    const v = .1 + .16 * n1 * n3 + energy * (.55 * n2 + .35 * n1) + beat * .45 * n2;
+    const len = S * .17 * Math.min(1, v), x = Math.cos(a), y = Math.sin(a);
+    r2.strokeStyle = `rgba(${hsl((hue + 70 * Math.sin(a + flow * .2) + 360) % 360, .9, .7)},${(.45 + .55 * Math.min(1, v * 1.6)) * orb})`;
+    r2.beginPath(); r2.moveTo(c + x * Rb, c + y * Rb); r2.lineTo(c + x * (Rb + len), c + y * (Rb + len)); r2.stroke();
+  }
+  r2.lineWidth = Math.max(1, S * .003);
+  r2.strokeStyle = `rgba(255,255,255,${.22 * orb})`; r2.beginPath(); r2.arc(c, c, Rb - S * .03, 0, 6.2832); r2.stroke();
+  if (energy > .03) {                                                          // a searching sweep while it works out the song
+    const a0 = t * 2.2; r2.lineWidth = Math.max(2, S * .008);
+    for (let j = 0; j < 2; j++) { r2.strokeStyle = `rgba(${accent},${Math.min(1, energy * 2.5) * orb})`; r2.beginPath(); r2.arc(c, c, Rb - S * .03, a0 + j * 3.1416, a0 + j * 3.1416 + 1.1); r2.stroke(); }
+  }
+}
+
+function drawFx(t, dt) {
+  g2.clearRect(0, 0, W, H);
+  g2.globalCompositeOperation = "lighter";
+  orbTarget = shown.status === "playing" ? 0 : 1;
+  orb += (orbTarget - orb) * Math.min(1, 2.4 * dt);
+  const hearing = $("listening").classList.contains("hearing");
+  energy += ((hearing ? .5 : 0) + beat * .3 - energy) * Math.min(1, 1.2 * dt);
+  flow += dt * (.35 + .9 * energy); ringFlow += dt * (.07 + .1 * energy);     // speed changes add up smoothly, never jump
+  if (orb > .01) {                                                  // a slow, living blob of light; it stirs when it hears music
+    const cx = W / 2, cy = H * .43, R = Math.min(W, H) * (.105 + .01 * Math.sin(t * .35) + .025 * energy);
+    const hue = (t * 2 + 215) % 360;
+    if (shown.status !== "playing" && state.status !== "playing" && t - accentAt > .5) { accentAt = t; applyAccent(hsl(hue, .85, .68)); }
+    g2.filter = lite ? "none" : "blur(5px)";
+    for (let layer = 0; layer < 4; layer++) {
+      const col = hsl((hue + layer * 38) % 360, .9, .58), ph = flow * (1 + layer * .3), wob = .09 + .04 * layer + .1 * energy;
+      g2.beginPath();
+      for (let a = 0; a <= 6.2832 + .05; a += .1) {
+        const r = R * (1 - layer * .1) * (1 + wob * (.5 * Math.sin(3 * a + ph + layer) + .3 * Math.sin(5 * a - ph * 1.3 + layer * 2) + .2 * Math.sin(2 * a + ph * .6)));
+        const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a); a ? g2.lineTo(x, y) : g2.moveTo(x, y);
+      }
+      const gr = g2.createRadialGradient(cx, cy, R * .1, cx, cy, R * 1.35);
+      gr.addColorStop(0, `rgba(${col},${.5 * orb})`); gr.addColorStop(.7, `rgba(${col},${.22 * orb})`); gr.addColorStop(1, `rgba(${col},0)`);
+      g2.fillStyle = gr; g2.fill();
+    }
+    g2.filter = "none";
+    drawRing(t, hue, hearing);
+  } else if (ringDrawn) { r2.clearRect(0, 0, RS, RS); ringDrawn = false; }
+  if (orb < .99) {                                                  // song: soft lights rising, quicker on the beat
+    for (const p of lights) {
+      p.y -= p.v * dt * (1 + 2.5 * beat); p.x += Math.sin(t * .3 + p.p) * .0004;
+      if (p.y < -.05) { p.y = 1.05; p.x = Math.random(); }
+      const r = p.r * H * (1 + .5 * beat), a = (.1 + .12 * Math.sin(t + p.p) ** 2 + .15 * beat) * (1 - orb);
+      const gr = g2.createRadialGradient(p.x * W, p.y * H, 0, p.x * W, p.y * H, r);
+      gr.addColorStop(0, `rgba(${p.k % 3 ? accent : "255,255,255"},${a})`); gr.addColorStop(1, `rgba(${accent},0)`);
+      g2.fillStyle = gr; g2.beginPath(); g2.arc(p.x * W, p.y * H, r, 0, 6.2832); g2.fill();
+    }
+  }
+}
+
+let lastT = 0, lastBeat = null, beatAt = 0, accentAt = 0, lite = /[?&]lite=1/.test(location.search), fxSkip = 0;
+if (lite) document.documentElement.classList.add("lite");
+let winStart = 0, winFrames = 0, bestFps = 0, badWindows = 0;
+function watchSpeed(t) {                        // frame rate well under what this screen has shown it can do, for 4 s: lighten the drawing for good
+  if (lite || /[?&]lite=0/.test(location.search)) return;
+  if (document.visibilityState !== "visible") { winStart = 0; return; }
+  if (!winStart) { winStart = t; winFrames = 0; return; }
+  winFrames++;
+  if (t - winStart < 2) return;
+  const fps = winFrames / (t - winStart); winStart = t; winFrames = 0;
+  bestFps = Math.max(bestFps, fps);
+  badWindows = fps < Math.max(24, .72 * bestFps) ? badWindows + 1 : 0;
+  if (badWindows >= 2) { lite = true; document.documentElement.classList.add("lite"); }
+}
+function frame(now) {
+  requestAnimationFrame(frame);
+  const t = (now || 0) / 1000;
+  watchSpeed(t);
+  if (t - lastT < 1 / 40) return;                 // our own drawing runs at 30 frames a second: plenty, and half the work
+  const dt = Math.min(.1, t - lastT); lastT = t;
+  beat += (beatTarget - beat) * (beatTarget > beat ? .8 : .22); beatTarget *= .8;       // fast attack, slow release
+  // The beat moves only the equaliser shown in intros/breaks (and, with a graphics card, the background glow).
+  // The lyric text just floats: it reads better and costs far less than re-drawing it on every beat.
+  const bv = (Math.round(beat * 10) / 10).toFixed(1), onBreak = current && current.firstChild.firstChild.firstChild.classList.contains("break");
+  if (bv !== lastBeat) { lastBeat = bv; for (const n of [lite ? null : $("glow"), lite ? null : $("card"), onBreak ? current : null]) if (n) n.style.setProperty("--beat", bv); }
+  if (!lite) drawFx(t, dt);
+  else if (shown.status !== "playing" && t - fxSkip >= .066) { drawFx(t, t - fxSkip > 1 ? .066 : t - fxSkip); fxSkip = t; }   // light mode: the orb at 15 frames a second
+  else if (lite && shown.status === "playing" && orb > 0) { orb = 0; g2.clearRect(0, 0, W, H); }
+  if (shown.status !== "playing" || shown.key !== state.key || !rows.length) return;
+  if (!$("song").classList.contains("words")) return;                // the card is still up: the first line pops in after it
+  const i = currentRow(); if (i == null) return;
+  const key = soft ? "g" + rows[i].group : "r" + i;
+  if (key !== activeKey) { activeKey = key; place(i); }
+  const dur = state.lyrics.track_duration || state.lyrics.duration;
+  $("progress").style.transform = `scaleX(${dur && state.pos != null && state.mode !== "live" ? clamp(songPos() / dur, 0, 1).toFixed(4) : 0})`;
+}
+
+// ---- input / connection -----------------------------------------------------------
+function hud(msg) { const h = $("hud"); h.textContent = msg; h.style.opacity = 1; clearTimeout(hud.t); hud.t = setTimeout(() => h.style.opacity = 0, 1500); }
+
+addEventListener("keydown", e => {
+  if (e.key === "+" || e.key === "=" || e.key === "ArrowUp") userOffset += 0.25;
+  else if (e.key === "-" || e.key === "ArrowDown") userOffset -= 0.25;
+  else if (e.key === "0") userOffset = 0;
+  else if (e.key === "s" || e.key === "Escape") { fetch("/api/stop", {method: "POST"}).finally(() => location.href = "/setup"); return; }   // back to the start page
+  else if (e.key === "f") { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); return; }
+  else return;
+  try { localStorage.setItem("offset", userOffset); } catch {}
+  hud(`Lyrics offset ${userOffset >= 0 ? "+" : ""}${userOffset.toFixed(2)}s`);
+});
+
+function onState(next) {
+  if (next.status === "setup") return location.replace("/setup?auto");     // nothing is running (it was restarted): back to the start page
+  const prev = state; state = next;
+  const songChanged = next.status !== prev.status || next.key !== prev.key;
+  if (songChanged) return transition(next);
+  if (next.status !== "playing") return setHearing(next.hearing);            // listening <-> identifying
+  $("badge").style.display = next.mode === "live" ? "inline-block" : "none";
+  if (shown.key !== next.key) return;                                        // still fading in: it will build from `state`
+  const lyricsChanged = hasLyrics(next) !== hasLyrics(prev) || !!next.loading !== !!prev.loading || next.translated !== prev.translated
+                     || (next.mode !== prev.mode && !(next.lyrics && next.lyrics.synced));
+  shown = next;
+  if (lyricsChanged) { buildLyrics(next); setCardNote(next); settleCard(); }
+}
+
+function connect() {
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.beat !== undefined) beatTarget = Math.max(beatTarget, m.beat); else onState(m); };
+  ws.onclose = e => e.code === 4401 ? location.replace("/login") : setTimeout(connect, 1000);     // 4401: not signed in
+}
+
+// Keep the screen from sleeping while the lyrics display is up
+async function stayAwake() { try { await navigator.wakeLock.request("screen"); } catch {} }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") stayAwake(); });
+stayAwake();
+
+setHearing(false); connect(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

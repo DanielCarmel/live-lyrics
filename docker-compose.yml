@@ -1,0 +1,21 @@
+# docker compose up -d   then open http://localhost:80
+#
+# Sound comes from this machine's PulseAudio/PipeWire (a normal Linux desktop). On a box without a
+# sound server, remove the PULSE_SERVER line and the pulse volume and add:   devices: ["/dev/snd"]
+# and   group_add: ["audio"]
+services:
+  live-lyrics:
+    build: .
+    image: live-lyrics
+    user: "${UID:-1000}:${GID:-1000}"          # same user as the desktop session, so the sound socket lets us in
+    ports:
+      - "0.0.0.0:80:80"                  # open to the network (and, with port forwarding, the internet). This machine only: "127.0.0.1:80:80"
+    environment:
+      PULSE_SERVER: unix:/tmp/pulse/native
+    volumes:
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native:/tmp/pulse/native
+      - ./data:/app/data                       # settings and the song library
+      - ./models:/app/models                   # Whisper models (downloaded on first start)
+    # command: ["--start"]                     # unattended: begin at once with the settings used last time
+    # command: ["--start", "--translate", "he"]
+    restart: unless-stopped

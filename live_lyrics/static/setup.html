@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Lyrics · Start</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;800&display=swap">
+<style>
+  :root { --accent:124,156,255; --line:rgba(255,255,255,.12); --dim:rgba(255,255,255,.58); }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html { background:#06060a; }
+  body { min-height:100vh; color:#f5f5f7; font-family:"Rubik",system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:4vh 16px; overflow-x:hidden; }
+  .aurora { position:fixed; inset:0; z-index:-1; overflow:hidden; }
+  .aurora i { position:absolute; width:78vmax; height:78vmax; border-radius:50%; left:50%; top:50%; margin:-39vmax; }
+  .aurora i:nth-child(1) { background:radial-gradient(circle, rgba(124,156,255,.26), transparent 62%); animation:a1 38s ease-in-out infinite alternate; }
+  .aurora i:nth-child(2) { background:radial-gradient(circle, rgba(255,60,170,.15), transparent 60%); animation:a2 46s ease-in-out infinite alternate; }
+  .aurora i:nth-child(3) { background:radial-gradient(circle, rgba(40,200,255,.13), transparent 60%); animation:a3 52s ease-in-out infinite alternate; }
+  @keyframes a1 { 0%{transform:translate(-22vw,-12vh)} 100%{transform:translate(18vw,10vh) scale(1.2)} }
+  @keyframes a2 { 0%{transform:translate(30vw,18vh)} 100%{transform:translate(-26vw,-6vh) scale(.9)} }
+  @keyframes a3 { 0%{transform:translate(-30vw,24vh)} 100%{transform:translate(24vw,-22vh) scale(1.15)} }
+
+  main { width:min(1040px,100%); }
+  .top { display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:3vh; }
+  .brand { font-weight:800; letter-spacing:.42em; font-size:.95rem; color:rgba(255,255,255,.6); }
+  .brand em { font-style:normal; color:rgb(var(--accent)); }
+  h1 { font-size:clamp(1.7rem,3.4vw,2.8rem); font-weight:800; letter-spacing:-.01em; margin-top:.5rem; text-wrap:balance; }
+  .grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px; }
+  @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
+  section { background:rgba(255,255,255,.045); border:1px solid var(--line); border-radius:16px; padding:18px 20px; }
+  section.wide { grid-column:1 / -1; }
+  .machine { margin-top:14px; font-size:.9rem; color:var(--dim); line-height:1.5; }
+  .opts.big button { font-size:1.25rem; padding:.75em 1.4em; }
+  h2 { font-size:.78rem; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); }
+  .hint { font-size:.9rem; color:var(--dim); margin:.4rem 0 .9rem; line-height:1.4; min-height:1.4em; }
+  .opts { display:flex; flex-wrap:wrap; gap:8px; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  .opts button { padding:.62em 1.05em; border-radius:11px; border:1px solid var(--line); background:rgba(255,255,255,.05); font-weight:500; font-size:1rem;
+    transition:background .15s, border-color .15s, transform .1s; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .opts button:hover { background:rgba(255,255,255,.1); }
+  .opts button:active { transform:scale(.97); }
+  .opts button.on { background:rgba(var(--accent),.9); border-color:transparent; color:#0a0a12; font-weight:600; }
+  .opts button:focus-visible, #go:focus-visible, summary:focus-visible, input:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  details { grid-column:1 / -1; }
+  summary { cursor:pointer; color:var(--dim); font-size:.9rem; letter-spacing:.06em; padding:.4rem .2rem; width:max-content; }
+  .adv { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px; margin-top:10px; }
+  @media (max-width:760px) { .adv { grid-template-columns:1fr; } }
+  input[type=text], input[type=password] { width:100%; padding:.65em .9em; border-radius:11px; border:1px solid var(--line); background:rgba(0,0,0,.3); color:#fff; font:inherit; }
+  .bottom { display:flex; align-items:center; gap:20px; margin-top:3vh; flex-wrap:wrap; }
+  #go { padding:.85em 2.6em; border-radius:99px; border:0; font-size:1.2rem; font-weight:800; letter-spacing:.04em; color:#0a0a12;
+    background:linear-gradient(100deg, #7c9cff, #c77dff 55%, #ff7ab8); box-shadow:0 8px 40px rgba(140,130,255,.45); transition:transform .12s, filter .2s; }
+  #go:hover { filter:brightness(1.1); } #go:active { transform:scale(.97); } #go:disabled { filter:grayscale(.6) brightness(.8); cursor:wait; }
+  #note { color:var(--dim); font-size:.95rem; line-height:1.4; flex:1; min-width:220px; }
+  #note b { color:#fff; font-weight:600; } #note.err { color:#ff8f8f; }
+  #note a { color:#fff; cursor:pointer; text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i></div>
+<main>
+  <div class="top"><div><div class="brand">LIVE <em>LYRICS</em></div><h1>Ready when you are</h1></div></div>
+  <div class="grid">
+    <section class="wide"><h2>Translate the lyrics</h2><div class="hint" id="h-translate"></div><div class="opts big" data-key="translate"></div></section>
+    <details><summary>More options</summary>
+      <div class="adv">
+        <section class="wide"><h2>Microphone</h2><div class="hint">Where the music is heard from. Closer to a speaker is better.</div><div class="opts" data-key="device"></div></section>
+        <section><h2>Recognise recordings (Shazam)</h2><div class="hint" id="h-shazam"></div><div class="opts" data-key="shazam"></div></section>
+        <section><h2>Live band</h2><div class="hint">Setlist file (one "Artist - Title" per line) so a band's songs are known in advance. Optional.</div>
+          <input type="text" id="setlist" placeholder="/path/to/setlist.txt" spellcheck="false">
+          <div class="hint" style="margin-top:.9rem">Genius token, to recognise songs outside the setlist by their words. Optional.</div>
+          <input type="password" id="genius_token" placeholder="token" autocomplete="off"></section>
+      </div>
+    </details>
+  </div>
+  <div class="machine" id="machine"></div>
+  <div class="bottom"><button id="go">Start</button><div id="note"></div></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+// each setting: its choices [value, label, what it means]
+const OPTIONS = {
+  translate: [[null, "Off", "Lyrics are shown in the song's own language."], ["en", "English", "Every song is shown in English."],
+              ["he", "עברית", "Every song is shown in Hebrew."], ["es", "Español", "Every song is shown in Spanish."]],
+  shazam: [[true, "On", "Recorded music is recognised with Shazam."], [false, "Off", "Only songs from the setlist, recognised by their words."]],
+  device: [[null, "System default", ""]],
+};
+let settings = {}, countdown = null;
+
+function render() {
+  for (const box of document.querySelectorAll(".opts")) {
+    const key = box.dataset.key; box.innerHTML = "";
+    for (const [value, label, hint] of OPTIONS[key]) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.title = label;
+      const on = settings[key] === value; b.className = on ? "on" : ""; b.setAttribute("aria-pressed", on);
+      if (on && $("h-" + key)) $("h-" + key).textContent = hint;
+      b.onclick = () => { settings[key] = value; render(); };
+      box.appendChild(b);
+    }
+  }
+}
+
+function cancelCountdown() {
+  if (!countdown) return;
+  clearInterval(countdown); countdown = null;
+  $("note").innerHTML = 'Press <b>S</b> on the lyrics screen to come back here.';
+}
+
+async function start() {
+  cancelCountdown();
+  $("go").disabled = true; $("go").textContent = "Starting…"; $("note").className = ""; $("note").textContent = "Getting ready. The first start can take a little longer.";
+  settings.setlist = $("setlist").value.trim(); settings.genius_token = $("genius_token").value.trim();
+  try {
+    const r = await fetch("/api/start", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(settings)});
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.error || "could not start");
+    if (out.url) location.href = out.url; else $("note").textContent = "Re-opening the screen for the chosen look…";
+  } catch (e) {
+    $("go").disabled = false; $("go").textContent = "Start"; $("note").className = "err";
+    $("note").textContent = "Couldn't start: " + e.message + ". Check the microphone and the setlist path, then try again.";
+  }
+}
+
+(async () => {
+  const res = await fetch("/api/options"); if (res.status === 401) return location.replace("/login");
+  const o = await res.json();
+  settings = o.settings;
+  for (const name of o.microphones) OPTIONS.device.push([name, name, ""]);
+  if (settings.device != null && !o.microphones.includes(settings.device)) settings.device = null;     // unplugged since last time
+  const W = {small: "follows the singing closely", base: "follows the singing with a lighter model", tiny: "follows the singing with the lightest model", off: "does not follow the singing (too little processor power)"};
+  $("machine").textContent = `Set for this machine automatically: ${o.auto.light ? "light look (no graphics card found)" : "full effects (graphics card found)"}, ${W[o.auto.whisper]}. Songs in any language are shown as long as lyrics exist.`;
+  $("setlist").value = settings.setlist || ""; if (o.token_saved) $("genius_token").placeholder = "saved (leave empty to keep it)";
+  render();
+  $("go").onclick = start;
+  $("note").innerHTML = 'Press <b>S</b> on the lyrics screen to come back here.';
+  // Unattended start: with choices saved from last time, begin by itself unless someone touches the page.
+  if (o.saved && !/[?&]stay/.test(location.search) && (document.referrer === "" || /[?&]auto/.test(location.search))) {
+    let left = 15;
+    const tick = () => { $("note").innerHTML = `Starting with last time's settings in <b>${left}</b> s. <a id="hold">Wait, let me change something</a>`; $("hold").onclick = cancelCountdown; };
+    tick(); countdown = setInterval(() => { if (--left <= 0) start(); else tick(); }, 1000);
+    for (const ev of ["pointerdown", "keydown", "wheel"]) addEventListener(ev, e => { if (e.target.id !== "go") cancelCountdown(); }, {once: true});
+  }
+})();
+addEventListener("keydown", e => { if (e.key === "Enter" && !$("go").disabled && e.target.tagName !== "INPUT") start(); });
+</script>
+</body>
+</html>
