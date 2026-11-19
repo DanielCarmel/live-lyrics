@@ -3,6 +3,10 @@
 # Sound comes from this machine's PulseAudio/PipeWire (a normal Linux desktop). On a box without a
 # sound server, remove the PULSE_SERVER line and the pulse volume and add:   devices: ["/dev/snd"]
 # and   group_add: ["audio"]
+# macOS / Windows: Docker runs in a virtual machine that has no sound card, so the container can't hear
+# anything itself. Remove the PULSE_SERVER line and the pulse volume (they do nothing there); the
+# browser that opens http://localhost listens instead and streams the sound in. Any other microphone
+# choice on the start page is unavailable.
 services:
   live-lyrics:
     build: .

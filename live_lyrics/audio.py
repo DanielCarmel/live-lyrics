@@ -58,6 +58,28 @@ class Mic(_Ring):
         self.stream.close()
 
 
+class BrowserMic(_Ring):
+    """Fed by a browser over the /ws/audio socket: for a server that can't reach a sound card itself
+    (Docker on macOS/Windows, a remote box). Frames are float32 PCM at the browser's sample rate."""
+
+    def __init__(self):
+        super().__init__()
+        self.rate = SAMPLE_RATE
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def feed(self, data: bytes):
+        x = np.frombuffer(data[:len(data) // 4 * 4], dtype=np.float32)
+        if self.rate != SAMPLE_RATE and len(x) > 1:
+            n = round(len(x) * SAMPLE_RATE / self.rate)
+            x = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype(np.float32)
+        self.push(x)
+
+
 class FileSource(_Ring):
     """Plays an audio file into the buffer in real time, as if it came from the mic.
     `af` is an optional ffmpeg audio filter, e.g. "atempo=1.06,asetrate=16000*1.03,aresample=16000"

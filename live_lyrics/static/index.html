@@ -737,7 +737,7 @@ function frame(now) {
 }
 
 // ---- input / connection -----------------------------------------------------------
-function hud(msg) { const h = $("hud"); h.textContent = msg; h.style.opacity = 1; clearTimeout(hud.t); hud.t = setTimeout(() => h.style.opacity = 0, 1500); }
+function hud(msg, stay) { const h = $("hud"); h.textContent = msg; h.style.opacity = msg ? 1 : 0; clearTimeout(hud.t); if (!stay) hud.t = setTimeout(() => h.style.opacity = 0, 1500); }
 
 addEventListener("keydown", e => {
   if (e.key === "+" || e.key === "=" || e.key === "ArrowUp") userOffset += 0.25;
@@ -766,8 +766,52 @@ function onState(next) {
 
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.beat !== undefined) beatTarget = Math.max(beatTarget, m.beat); else onState(m); };
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.beat !== undefined) beatTarget = Math.max(beatTarget, m.beat); else { if (m.mic) m.mic === "browser" ? listen() : stopListening(); onState(m); } };
   ws.onclose = e => e.code === 4401 ? location.replace("/login") : setTimeout(connect, 1000);     // 4401: not signed in
+}
+
+// When the server has no microphone of its own (Docker on a Mac or Windows, a remote box), this page
+// listens and streams what it hears to the server as float32 PCM over /ws/audio.
+let mic = null;
+async function listen() {
+  if (mic) return;
+  mic = {};
+  if (!navigator.mediaDevices?.getUserMedia || !window.AudioWorklet) { mic = null; return hud("The browser won't open the microphone here: use http://localhost or HTTPS", true); }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}}); }
+  catch (e) { mic = null; console.error("microphone", e); return hud("Microphone not allowed: " + e.message + " - allow it for this site and reload", true); }
+  console.log("microphone:", stream.getAudioTracks()[0]?.label);
+  const ctx = new AudioContext();
+  const tap = `registerProcessor("tap", class extends AudioWorkletProcessor { process(i) { if (i[0][0]) this.port.postMessage(i[0][0].slice()); return true; } })`;
+  try { await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([tap], {type: "application/javascript"}))); }
+  catch (e) { mic = null; console.error("audio worklet", e); stream.getTracks().forEach(t => t.stop()); return hud("This browser can't capture audio: " + e.message, true); }
+  const node = new AudioWorkletNode(ctx, "tap"); ctx.createMediaStreamSource(stream).connect(node);
+  let ws = null, chunks = [], size = 0, sent = 0;
+  node.port.onmessage = e => {
+    chunks.push(e.data); size += e.data.length;
+    if (size < ctx.sampleRate / 10) return;                                   // send a tenth of a second at a time
+    if (ws?.readyState === 1) { const buf = new Float32Array(size); let i = 0; for (const c of chunks) { buf.set(c, i); i += c.length; } ws.send(buf); if (++sent === 10) { hud(""); console.log("microphone: streaming to the server"); } }
+    chunks = []; size = 0;
+  };
+  const open = () => {
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/audio`);
+    ws.onopen = () => { ws.send(JSON.stringify({rate: ctx.sampleRate})); sent = 0; };
+    ws.onclose = e => {
+      if (e.code === 4409) { stopListening(); hud("Another screen is listening now", true); }   // the newest screen is the microphone
+      else if (e.code !== 4401 && e.code !== 4404 && mic) setTimeout(open, 1000);              // 4404: the server listens by itself
+    };
+  };
+  open();
+  mic = {stream, ctx, close: () => ws?.close()};
+  const wake = () => { if (ctx.state === "running") return; hud("Click or press a key to start listening", true); ctx.resume(); };   // browsers may hold back audio until the page is touched
+  ctx.onstatechange = () => { console.log("audio context", ctx.state); if (ctx.state === "running") hud("Listening through this browser"); else wake(); };
+  for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, () => ctx.resume());
+  ctx.state === "running" ? hud("Listening through this browser") : wake();
+}
+function stopListening() {
+  if (!mic?.ctx) return;
+  const m = mic; mic = null;
+  m.close(); m.stream.getTracks().forEach(t => t.stop()); m.ctx.close();
 }
 
 // Keep the screen from sleeping while the lyrics display is up

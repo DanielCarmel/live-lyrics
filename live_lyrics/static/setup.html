@@ -65,7 +65,7 @@
     <section class="wide"><h2>Translate the lyrics</h2><div class="hint" id="h-translate"></div><div class="opts big" data-key="translate"></div></section>
     <details><summary>More options</summary>
       <div class="adv">
-        <section class="wide"><h2>Microphone</h2><div class="hint">Where the music is heard from. Closer to a speaker is better.</div><div class="opts" data-key="device"></div></section>
+        <section class="wide"><h2>Microphone</h2><div class="hint" id="h-device"></div><div class="opts" data-key="device"></div></section>
         <section><h2>Recognise recordings (Shazam)</h2><div class="hint" id="h-shazam"></div><div class="opts" data-key="shazam"></div></section>
         <section><h2>Live band</h2><div class="hint">Setlist file (one "Artist - Title" per line) so a band's songs are known in advance. Optional.</div>
           <input type="text" id="setlist" placeholder="/path/to/setlist.txt" spellcheck="false">
@@ -80,11 +80,12 @@
 <script>
 const $ = id => document.getElementById(id);
 // each setting: its choices [value, label, what it means]
+const BROWSER_MIC = ["browser", "This browser", "The browser that opens the lyrics screen listens through its own microphone and sends the sound to the server. Open the page as http://localhost or over HTTPS, or the browser won't allow it."];
 const OPTIONS = {
   translate: [[null, "Off", "Lyrics are shown in the song's own language."], ["en", "English", "Every song is shown in English."],
               ["he", "עברית", "Every song is shown in Hebrew."], ["es", "Español", "Every song is shown in Spanish."]],
   shazam: [[true, "On", "Recorded music is recognised with Shazam."], [false, "Off", "Only songs from the setlist, recognised by their words."]],
-  device: [[null, "System default", ""]],
+  device: [[null, "System default", "Where the music is heard from. Closer to a speaker is better."]],
 };
 let settings = {}, countdown = null;
 
@@ -127,7 +128,13 @@ async function start() {
   const o = await res.json();
   settings = o.settings;
   for (const name of o.microphones) OPTIONS.device.push([name, name, ""]);
-  if (settings.device != null && !o.microphones.includes(settings.device)) settings.device = null;     // unplugged since last time
+  if (!o.microphones.length) {   // no sound card in reach of the server (Docker on a Mac or Windows, a remote box): the browser listens
+    OPTIONS.device = [[null, "This browser", "The server has no microphone of its own, so the browser that opens the lyrics screen listens and sends the sound to the server. Open the page as http://localhost or over HTTPS, or the browser won't allow it."]];
+    settings.device = null;
+  } else {
+    OPTIONS.device.push(BROWSER_MIC);
+    if (settings.device != null && settings.device !== "browser" && !o.microphones.includes(settings.device)) settings.device = null;     // unplugged since last time
+  }
   const W = {small: "follows the singing closely", base: "follows the singing with a lighter model", tiny: "follows the singing with the lightest model", off: "does not follow the singing (too little processor power)"};
   $("machine").textContent = `Set for this machine automatically: ${o.auto.light ? "light look (no graphics card found)" : "full effects (graphics card found)"}, ${W[o.auto.whisper]}. Songs in any language are shown as long as lyrics exist.`;
   $("setlist").value = settings.setlist || ""; if (o.token_saved) $("genius_token").placeholder = "saved (leave empty to keep it)";

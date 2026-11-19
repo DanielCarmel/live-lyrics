@@ -100,6 +100,13 @@ google-chrome --kiosk http://localhost
       devices: ["/dev/snd"]
       group_add: ["audio"]
   ```
+- **macOS and Windows.** Docker runs in a virtual machine with no sound card, so the container can't
+  hear anything itself (the pulse lines in the compose file do nothing there; remove them). Instead the
+  **browser that opens the lyrics screen listens** through its own microphone and streams the sound to
+  the container. Open **http://localhost** (not the machine's IP: browsers only open the microphone on
+  `localhost` or over HTTPS), allow the microphone when asked, and keep that tab open - it is both the
+  screen and the ear. If several screens are open, the one opened last is the microphone. The same
+  mode can be picked on any machine under *More options → Microphone → This browser*.
 - **Kept between runs.** `./data` (settings, the song library) and `./models` (Whisper models) are mounted
   from the project folder.
 - **Restarts.** `restart: unless-stopped` brings the container back after a reboot. An open lyrics screen
@@ -137,7 +144,7 @@ Whisper model. The lyrics screen is drawn by whichever browser opens it, with th
 | Setting | Choices |
 |---|---|
 | Translate the lyrics | Off, English, Hebrew, Spanish |
-| Microphone *(More options)* | System default or any input device found |
+| Microphone *(More options)* | System default, any input device found, or *This browser* (the lyrics screen listens and streams the sound in; the only choice when the server has no sound card, e.g. Docker on macOS) |
 | Recognise recordings *(More options)* | Shazam on or off |
 | Live band *(More options)* | A setlist file, and a Genius token |
 

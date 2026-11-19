@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
+import numpy as np
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -108,6 +109,7 @@ class Session:
         self.task: asyncio.Task | None = None
         self.settings: dict | None = None
         self.clients: set = set()
+        self.mic_client: WebSocket | None = None   # the browser that is the microphone, if any
         self.transcribers: dict = {}
         self.browser = None
         self.kiosk = False   # we open the full-screen window ourselves
@@ -130,6 +132,8 @@ class Session:
         await self.stop()
         if self.simulate:
             source = audio.FileSource(*self.simulate)
+        elif settings["device"] == "browser" or (not settings["device"] and not microphones()):
+            source = audio.BrowserMic()   # no sound card in reach (e.g. Docker on a Mac): the browser listens for us
         else:
             dev = settings["device"]
             source = audio.Mic(int(dev) if isinstance(dev, str) and dev.isdigit() else dev or None)
@@ -159,6 +163,9 @@ class Session:
             except BaseException:
                 pass
         self.engine = self.task = None
+
+    def mic(self) -> str:
+        return "browser" if self.engine and isinstance(self.engine.source, audio.BrowserMic) else "server"
 
     async def show(self, path: str, light: bool):
         """Open (or re-open) the full-screen window. Drawing without the graphics card is a browser
@@ -277,8 +284,8 @@ def build_app(session, open_path: str | None = None, start_with: dict | None = N
         light = bool(session.settings["light"])
         if session.browser and getattr(session, "browser_light", light) != light:
             asyncio.get_running_loop().call_later(0.3, lambda: asyncio.ensure_future(session.show(session.display_path(), light)))
-            return {"reopening": True}
-        return {"url": session.display_path()}
+            return {"reopening": True, "mic": session.mic()}
+        return {"url": session.display_path(), "mic": session.mic()}
 
     @app.post("/api/stop")
     async def stop():
@@ -291,12 +298,52 @@ def build_app(session, open_path: str | None = None, start_with: dict | None = N
             return await sock.close(code=4401)
         await sock.accept()
         session.clients.add(sock)
-        await sock.send_text(json.dumps(session.engine.state if session.engine else {"status": "setup"}))
+        await sock.send_text(json.dumps({**session.engine.state, "mic": session.mic()} if session.engine else {"status": "setup"}))
         try:
             while True:
                 await sock.receive_text()
         except WebSocketDisconnect:
             session.clients.discard(sock)
+
+    @app.websocket("/ws/audio")
+    async def ws_audio(sock: WebSocket):
+        """A browser's microphone: a text frame {"rate": Hz} first, then binary float32 PCM frames."""
+        if not allowed(sock.cookies):
+            return await sock.close(code=4401)
+        if session.mic() != "browser":
+            return await sock.close(code=4404)
+        await sock.accept()
+        if session.mic_client:   # one browser listens at a time: the newest
+            try:
+                await session.mic_client.close(code=4409)
+            except Exception:
+                pass
+        session.mic_client = sock
+        rate = audio.SAMPLE_RATE
+        log.info("microphone: browser connected (%s)", sock.client.host if sock.client else "?")
+        frames, loud = 0, 0.0
+        try:
+            while True:
+                msg = await sock.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                if msg.get("text"):
+                    rate = int(json.loads(msg["text"]).get("rate", audio.SAMPLE_RATE))
+                    log.info("microphone: browser sends %d Hz", rate)
+                elif msg.get("bytes") and session.mic() == "browser":   # (survives a restart with new settings)
+                    session.engine.source.rate = rate
+                    session.engine.source.feed(msg["bytes"])
+                    frames += 1
+                    loud = max(loud, audio.rms(np.frombuffer(msg["bytes"], dtype=np.float32)))
+                    if frames % 100 == 0 and frames <= 300:   # the first half minute: is anything coming in?
+                        log.info("microphone: %d s of sound from the browser, peak level %.4f%s", frames // 10, loud,
+                                 "" if loud > 0.001 else " (silence: is the microphone allowed and unmuted?)")
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            log.info("microphone: browser disconnected")
+            if session.mic_client is sock:
+                session.mic_client = None
 
     return app
 
