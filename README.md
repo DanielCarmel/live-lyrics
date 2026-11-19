@@ -51,6 +51,7 @@ The first start downloads a Whisper speech model (150-500 MB) into `./models`.
 | **Now playing** | A song was just recognised: cover art, title, artist |
 | **Lyrics** | One line at a time fills the screen and pops in with its own move, then floats gently |
 | **Break** | Intros and instrumental passages show a picture that moves with the beat |
+| **History** | `/history` lists what played, by evening. Nothing to press during the night - look it up after |
 
 **Looks.** There are 26 text styles, each with its own typeface (and a matching Hebrew one), entrance
 moves and break picture: spinning record with the cover art, level meter, heartbeat trace, neon rings,
@@ -67,6 +68,10 @@ come from the cover art.
 | `↑` / `↓` | Shift lyric timing by 0.25 s (remembered) |
 | `0` | Reset the timing shift |
 | `F` | Toggle full-screen |
+
+**On a tablet or TV browser** the display can be installed as an app (Chrome: menu → *Add to home screen* /
+*Install*): it then opens full-screen with no browser chrome. While lyrics are up the page also asks the
+browser to keep the screen awake, so a shelf tablet doesn't go dark mid-song.
 
 ## Docker
 
@@ -123,9 +128,13 @@ audio never leaves the machine.
 - **This machine only:** change the port line to `"127.0.0.1:80:80"`.
 - **Require a password:** add `LIVE_LYRICS_PASSWORD: "something-long"` under `environment:`. Every browser
   then signs in once and stays signed in for a year.
+- **HTTPS:** add `command: ["--https"]` (or run with `--https` outside Docker) to serve over HTTPS with a
+  self-signed certificate, made once into `data/`. Browsers warn about it once; accept to continue. This is
+  what lets a browser on *another* device act as the microphone, or install the display as an app -
+  browsers allow those only on localhost or over HTTPS.
 - **From the internet:** forward a port on the router to this machine's port 80. The connection is plain
-  HTTP, so a password would travel unencrypted; for anything beyond a quick experiment, put it behind HTTPS
-  (a reverse proxy, or a tunnel such as Cloudflare Tunnel or Tailscale).
+  HTTP, so a password would travel unencrypted; for anything beyond a quick experiment, use `--https` or
+  put it behind a reverse proxy or a tunnel such as Cloudflare Tunnel or Tailscale.
 
 ### Image variants
 
@@ -183,9 +192,12 @@ mic ──► loudness monitor (4×/s) ── is there music? did it pause? did 
 - **Shazam** (via [`shazamio`](https://github.com/shazamio/ShazamIO)) identifies recordings and returns the
   exact position in the song. The free service blocks after a few lookups in quick succession, so lookups
   are budgeted and made only for a reason: music started, a blip of silence (a skip), the words stopped
-  fitting, the lyrics say singing but none is heard, or nothing has confirmed the song for a while.
+  fitting, the lyrics say singing but none is heard, or nothing has confirmed the song for a while. Each
+  answer's runner-up candidates are kept too: when the top answer has no lyrics, or its lyrics don't fit
+  the singing, the runner-ups are tried (plain metadata requests - no recognition quota) before giving up.
 - **Whisper** ([faster-whisper](https://github.com/SYSTRAN/faster-whisper), running locally) transcribes the
-  singing every couple of seconds while a song is up. That is how the app, without asking Shazam:
+  singing every couple of seconds while a song is up (after a high-pass filter removes rumble below the
+  vocal range, and words Whisper itself doubts are discarded). That is how the app, without asking Shazam:
   - confirms the song is still the same (the words fit the lyrics on screen);
   - notices a song change or a seek (the words don't fit, or fit another part);
   - corrects lyric timing: if a lyric file consistently runs early or late against what is heard, the
@@ -193,9 +205,11 @@ mic ──► loudness monitor (4×/s) ── is there music? did it pause? did 
   - follows live bands, which Shazam can't match: the song is recognised from its words (a setlist, every
     song seen before, optionally Genius) and the display follows the singer line by line.
 - **Lyrics**, best source first: [LRCLIB](https://lrclib.net) synced → NetEase Cloud Music synced → LRCLIB
-  plain → lyrics.ovh plain. A candidate must match on title plus artist or exact track length (from
-  Apple's free lookup), which avoids most wrong-version matches. Lyrics without timestamps still move:
-  they follow the singer via Whisper, with an estimate in between.
+  plain → lyrics.ovh plain. An exact-signature LRCLIB lookup (title + artist + track length) is tried
+  first and usually answers in one request; otherwise a wider search is scored - a candidate must match on
+  title plus artist or exact track length (from Apple's free lookup), which avoids most wrong-version
+  matches. Lyrics without timestamps still move: they follow the singer via Whisper, with an estimate in
+  between.
 - **Display.** A web page fed over a WebSocket. Text styles, entrances and break pictures are plain CSS
   animations; the beat value from the microphone drives the break pictures and the background glow.
 
@@ -209,6 +223,7 @@ Run with no options to use the start page. Giving any setting on the command lin
 | `--translate LANG` | Show lyrics translated into `en`, `he` or `es` |
 | `--no-gpu` | Use no graphics card: Whisper on the CPU with a smaller model, light look |
 | `--host` / `--port` | Address and port to serve on (default `0.0.0.0`, `80`) |
+| `--https` | Serve over HTTPS with a self-signed certificate (made once into `data/`, needs `openssl`). Lets a browser on another device be the microphone, and the display be installed as an app |
 | `--no-display` | Don't open a browser window; open the address in any browser yourself |
 | `--device N` | Microphone, by index or name (`--list-devices` shows them) |
 | `--setlist FILE` | `Artist - Title` per line. For live bands: lyrics are fetched ahead and matched by the words |
@@ -226,7 +241,7 @@ Environment: `LIVE_LYRICS_PASSWORD` turns on the sign-in page.
 
 ## Privacy and outside services
 
-- **Audio stays on the machine**, with one exception: short clips (about 6 seconds) are sent to Shazam to
+- **Audio stays on the machine**, with one exception: short clips (4–12 seconds) are sent to Shazam to
   identify the song, and only while music is detected.
 - **Whisper runs locally.** What it hears is not stored, and not logged unless `--verbose` is given.
 - **Sent out as text:** song title and artist (to the lyric sources and Apple's lookup), and the lyrics
@@ -235,7 +250,8 @@ Environment: `LIVE_LYRICS_PASSWORD` turns on the sign-in page.
 - **Shazam and Google Translate are used through unofficial, keyless access.** They can change or be
   limited without notice; this is a personal project, not something to build a product on as is.
 - **Stored locally** in `data/`: settings (including a Genius token, in plain text), the song library with
-  lyrics, timing corrections and translations, and the browser profile of the full-screen window.
+  lyrics, timing corrections and translations, the play history (`history.jsonl`, for the `/history` page),
+  the HTTPS certificate when `--https` is used, and the browser profile of the full-screen window.
 
 ## Known limits
 
@@ -249,9 +265,12 @@ Environment: `LIVE_LYRICS_PASSWORD` turns on the sign-in page.
 - **The lighter Whisper models** (used without a graphics card) are weaker on sung words, especially in
   Hebrew, so song changes without a pause are caught more slowly there.
 - **Songs whose title is listed differently** by Shazam and the lyric sources (for example only a
-  transliterated title) may show the title card without lyrics.
+  transliterated title) may show the title card without lyrics; Shazam's runner-up listings of the same
+  song are tried as a fallback.
 - **Live mode needs vocals** and a microphone that hears them clearly.
-- **Crowd noise** over the music (a busy bar) has not been tested.
+- **Crowd noise** over the music (a busy bar) has not been field-tested. A high-pass filter and Whisper's
+  own word confidence keep chatter from being mistaken for singing, but a room shouting over the music
+  will still slow recognition down.
 
 ## Project layout
 

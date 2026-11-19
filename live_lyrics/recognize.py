@@ -21,13 +21,10 @@ class Match:
     cover: str | None
     adamid: str | None = None   # Apple Music id, used to look up the exact track length
     genre: str | None = None    # e.g. "Pop", "Hip-Hop/Rap": picks the display's text style
+    alternates: tuple[str, ...] = ()   # runner-up track keys from the same lookup
 
 
-async def identify(audio: bytes | str) -> Match | None:
-    out = await _shazam.recognize(audio)
-    track, matches = out.get("track"), out.get("matches") or []
-    if not track or not matches:
-        return None
+def _from_track(track: dict, offset: float, alternates: tuple[str, ...] = ()) -> Match:
     album = None
     for section in track.get("sections", []):
         for m in section.get("metadata", []) or []:
@@ -40,8 +37,31 @@ async def identify(audio: bytes | str) -> Match | None:
         title=track.get("title", ""),
         artist=track.get("subtitle", ""),
         album=album,
-        offset=float(matches[0].get("offset", 0.0)),
+        offset=offset,
         cover=(track.get("images") or {}).get("coverart"),
         adamid=adamid,
         genre=(track.get("genres") or {}).get("primary"),
+        alternates=alternates,
     )
+
+
+async def identify(audio: bytes | str) -> Match | None:
+    out = await _shazam.recognize(audio)
+    track, matches = out.get("track"), out.get("matches") or []
+    if not track or not matches:
+        return None
+    key = str(track.get("key"))
+    alts = tuple(str(m["id"]) for m in matches[1:3] if m.get("id") and str(m["id"]) != key)
+    return _from_track(track, float(matches[0].get("offset", 0.0)), alts)
+
+
+async def about(key: str) -> Match | None:
+    """A track's metadata by its Shazam id: how a runner-up match is resolved into a usable
+    Match. A plain metadata request - it spends none of the recognition quota."""
+    try:
+        track = await _shazam.track_about(int(key))
+    except Exception:
+        return None
+    if not isinstance(track, dict) or not track.get("key"):
+        return None
+    return _from_track(track, 0.0)

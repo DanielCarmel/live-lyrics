@@ -14,6 +14,7 @@ import json
 import logging
 import time
 from collections import deque
+from dataclasses import replace
 
 import numpy as np
 from shazamio.exceptions import RateLimited
@@ -25,7 +26,10 @@ from .matcher import SongText
 log = logging.getLogger("live-lyrics")
 
 STEP = 2.0               # seconds between Whisper passes
-CLIP = 6.0               # seconds of audio sent to Shazam
+CLIP = 12.0              # seconds of audio sent to Shazam: its clients' full window (more accurate
+                         # than a short clip; 15 s or more gets no matches at all)
+CLIP_SUSPECT = 6.0       # when the song may have just changed with no known boundary: a longer clip
+                         # could reach back into the old song and wrongly re-confirm it
 WINDOW = 10.0            # seconds of audio given to Whisper
 AFTER_GAP = 4.0          # seconds of new audio needed before a Shazam lookup is worth it
 
@@ -45,7 +49,8 @@ RESERVE = 2              # tokens kept back for real events (new song, song chan
 MIN_SPACING = 6.0        # never two lookups closer than this
 BLOCK_PAUSE = 30.0       # after Shazam says "rate limited"
 TIMEOUT = 6.0
-IDLE_BACKOFF = (8.0, 15.0, 30.0, 60.0)  # unidentified sound: retry ever more slowly
+IDLE_BACKOFF = (6.0, 12.0, 30.0, 60.0)  # unidentified sound: retry soon (a longer, likelier clip
+                                        # has accumulated by then), then ever more slowly
 LONGSHOT_EVERY = (60.0, 120.0, 300.0)  # no clear music detected: still take a rare look (very quiet music)
 # Locked song that nothing has confirmed for a while -> ask Shazam. How long "a while" is depends
 # on how much budget is going spare (unused tokens don't accumulate, so a full bucket is free to use).
@@ -149,6 +154,8 @@ class Engine:
         self.gap_cooldown, self.gap_until = ALARM_COOLDOWN, 0.0
         self.confirms = self.silent_passes = 0
         self.suspect = None
+        self.alternates: tuple[str, ...] = ()   # runner-up track keys from the lookup that locked this song
+        self.alt_tried: set[str] = set()
         self.prev_word = None
         self.locked_at = time.time()
         self.cal: dict[int, float] = {}
@@ -306,6 +313,9 @@ class Engine:
                 log.info("music started (level %.4f, room %.4f)", level, self.noise)
             elif self.present and len(recent) == PRESENT_OFF and not any(recent):
                 self.present = False
+                # The counterpart of "music started": without it, sound that flickers around the
+                # threshold (music barely above the room) reads as the same line logged twice.
+                log.info("music gone (level %.4f, room %.4f)", level, self.noise)
             if self.hearing != before:
                 self.state = {"status": "listening", "hearing": self.hearing}
                 await self.broadcast()
@@ -367,7 +377,7 @@ class Engine:
         if time.time() < self.next_listen:
             return
         gen, t0 = self.generation, time.time()
-        words = await asyncio.to_thread(self.transcriber.words, samples,
+        words = await asyncio.to_thread(self.transcriber.words, audio.high_pass(samples),
                                         self.song_lang if self.mode else None)
         # On a slow machine, listen less often rather than keep the CPU busy: at most a quarter of the time
         took = time.time() - t0
@@ -412,8 +422,12 @@ class Engine:
                 reason, urgent = "unconfirmed", False
         if not reason or self.budget.available() < (1 if urgent else RESERVE + 1):
             return
-        # Only audio from after the gap / onset: a clip mixing two songs won't match
-        seconds = CLIP if since is None else max(AFTER_GAP, min(CLIP, end_wall - since))
+        if since is not None:   # only audio from after the gap / onset: a clip mixing two songs won't match
+            seconds = max(AFTER_GAP, min(CLIP, end_wall - since))
+        elif reason in ("words don't fit", "no singing", "position jump"):
+            seconds = CLIP_SUSPECT   # the change (if real) has no known boundary: stay recent
+        else:
+            seconds = CLIP
         clip, end_wall = self.source.latest(seconds)
         if len(clip) < AFTER_GAP * audio.SAMPLE_RATE or audio.rms(clip) < self.min_level:
             return  # not enough audio yet / dead silence: don't waste a lookup
@@ -503,6 +517,7 @@ class Engine:
         self._clear_song()
         gen = self.generation
         self.mode, self.song_key, self.last_confirmed = "recorded", key, now
+        self.alternates = tuple(getattr(m, "alternates", ()) or ())
         self.locked_at = clip_start
         self.gap_until, self.pending_gap = now + NEW_SONG_GAP_GRACE, None
         entry = self.library.songs.get(key)
@@ -511,6 +526,7 @@ class Engine:
                       "pos": m.offset, "wall": clip_start,
                       "lyrics": None, "loading": True,
                       "offset": (entry or {}).get("offset", 0)}
+        self.library.record_play(key, m.title, m.artist, m.cover)
         if entry:
             self._set_lyrics(entry["lyrics"])
             shown, todo = self._translated(key, entry["lyrics"])
@@ -522,7 +538,9 @@ class Engine:
             if self.state["loading"]:
                 await self._show_lyrics(key, entry["lyrics"], gen)
             return
-        lyr = await lyrics.fetch(m.title, m.artist, m.adamid)
+        lyr = await lyrics.fetch(m.title, m.artist, m.adamid, m.album)
+        if gen == self.generation and self.alternates and not (lyr and ("synced" in lyr or "plain" in lyr)):
+            lyr = await self._lyrics_from_alternates(lyr)
         if lyr and ("synced" in lyr or "plain" in lyr):
             await self.library.add(m.title, m.artist, lyr)
         if gen != self.generation:
@@ -601,7 +619,62 @@ class Engine:
         if self.mismatches == MISMATCH_CHECK or eager:
             self.force_check = "words don't fit"
         elif self.mismatches >= MISMATCH_DROP:
-            await self.to_listening("song changed, new one not identified yet", music_continues=True)
+            if not await self.try_alternate(" ".join(texts)):
+                await self.to_listening("song changed, new one not identified yet", music_continues=True)
+
+    async def _lyrics_from_alternates(self, found: dict | None) -> dict | None:
+        """No lyrics under Shazam's listing of the song. The same lookup's runner-ups are often
+        the very same song listed differently (transliteration, remaster, single vs album), and
+        THAT listing may have lyrics. Costs only metadata requests, and only for lyricless songs."""
+        gen = self.generation
+        for key in self.alternates:
+            if key in self.alt_tried:
+                continue
+            self.alt_tried.add(key)
+            alt = await recognize.about(key)
+            if gen != self.generation:
+                return found
+            if not alt:
+                continue
+            lyr = await lyrics.fetch(alt.title, alt.artist, alt.adamid, alt.album)
+            if gen != self.generation:
+                return found
+            if lyr and ("synced" in lyr or "plain" in lyr):
+                log.info("no lyrics as '%s - %s'; found under the runner-up listing %s - %s",
+                         self.state.get("artist"), self.state.get("title"), alt.artist, alt.title)
+                if found and found.get("track_duration") and not lyr.get("track_duration"):
+                    lyr["track_duration"] = found["track_duration"]
+                return lyr
+        return found
+
+    async def try_alternate(self, heard: str) -> bool:
+        """The sung words fit nothing on screen and the song is about to be dropped. Maybe the
+        lookup's top answer was the wrong version - its runner-up candidates were kept, so see
+        whether the heard words fit one of THEM, and swap silently if so. No recognition quota
+        is spent, and a wrong answer self-corrects instead of blanking the screen."""
+        gen = self.generation
+        for key in self.alternates:
+            if key in self.alt_tried:
+                continue
+            self.alt_tried.add(key)
+            alt = await recognize.about(key)
+            if gen != self.generation:
+                return True   # another song took over while we looked: nothing left to drop
+            if not alt:
+                continue
+            lyr = await lyrics.fetch(alt.title, alt.artist, alt.adamid, alt.album)
+            if gen != self.generation:
+                return True
+            st = SongText.from_lyrics(lyr)
+            if not (st and st.words) or matcher.score_text(heard, st) < matcher.IDENTIFY_THRESHOLD:
+                continue
+            pos = 0.0
+            if st.times and (loc := matcher.locate(heard.split(), st, None)):
+                pos = st.times[st.word_line[loc[0]]]   # start the clock where the singer is
+            log.info("the words fit Shazam's runner-up match: %s - %s -> swapped", alt.artist, alt.title)
+            await self.on_match(replace(alt, offset=pos), time.time(), "alternate")
+            return True
+        return False
 
     async def suspicion(self, sign: str):
         """A sign of a song change while lookups are blocked. Two different signs: clear the screen -
@@ -679,6 +752,7 @@ class Engine:
         self.state = {"status": "playing", "mode": "live", "key": key, "title": song["title"],
                       "artist": song["artist"], "cover": None, "lyrics": song["lyrics"],
                       "loading": False, "offset": 0, "line": None, "pos": None, "wall": time.time()}
+        self.library.record_play(key, song["title"], song["artist"])
         shown, todo = self._translated(key, song["lyrics"])
         self.state.update(lyrics=shown, translated=self.translate_to if shown is not song["lyrics"] else None)
         self.follow(heard, start_wall)

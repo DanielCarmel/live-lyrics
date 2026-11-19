@@ -115,6 +115,18 @@ def rms(samples: np.ndarray) -> float:
     return float(np.sqrt(np.mean(samples ** 2))) if samples.size else 0.0
 
 
+def high_pass(samples: np.ndarray, cutoff: float = 120.0) -> np.ndarray:
+    """Samples with everything below `cutoff` Hz taken out (in the spectrum, with a soft shoulder
+    rather than a hard edge). Sung vocals live above; rumble, air conditioning and bass bleed live
+    below and only confuse Whisper in a noisy room."""
+    if len(samples) < SAMPLE_RATE // 4:
+        return samples
+    spec = np.fft.rfft(samples)
+    freqs = np.fft.rfftfreq(len(samples), 1 / SAMPLE_RATE)
+    spec *= np.clip((freqs - cutoff * 0.5) / (cutoff * 0.5), 0, 1)   # ramps from cutoff/2 up to cutoff
+    return np.fft.irfft(spec, len(samples)).astype(np.float32)
+
+
 def find_gap(samples: np.ndarray, noise: float | None = None, frame: float = 0.1,
              min_len: float = 0.3) -> float | None:
     """Seconds into `samples` where the most recent gap ENDS (e.g. the blip of silence when a

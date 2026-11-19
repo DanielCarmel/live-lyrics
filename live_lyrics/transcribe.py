@@ -14,12 +14,15 @@ _JUNK_ANYWHERE = ("thank you for watching", "thanks for watching", "subtitles by
                   "see you in the next")
 _JUNK_WHOLE = {"thank you", "thanks", "you", "bye", "okay", "ok", "yeah", "oh", "so", "the end"}
 
+MIN_WORD_PROB = 0.3   # words Whisper itself doubts (crowd chatter, mumble) are junk, not evidence
+
 
 @dataclass
 class Word:
     text: str
     start: float  # seconds relative to the start of the audio passed in
     end: float
+    prob: float = 1.0   # Whisper's own confidence in the word
 
 
 class Transcriber:
@@ -67,7 +70,8 @@ class Transcriber:
             if (s.avg_logprob < -1.0 or s.compression_ratio > 2.4 or s.no_speech_prob > 0.85
                     or bare in _JUNK_WHOLE or any(j in text for j in _JUNK_ANYWHERE)):
                 continue
-            out += [Word(w.word.strip(), w.start, w.end) for w in (s.words or []) if w.word.strip()]
+            out += [Word(w.word.strip(), w.start, w.end, w.probability) for w in (s.words or [])
+                    if w.word.strip() and w.probability >= MIN_WORD_PROB]
         return out
 
 

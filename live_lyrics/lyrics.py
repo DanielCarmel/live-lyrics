@@ -20,6 +20,7 @@ API = "https://lrclib.net/api"
 HEADERS = {"User-Agent": "live-lyrics-poc/0.1"}
 _TS = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
 _cache: dict[tuple[str, str], dict | None] = {}
+_transport: httpx.AsyncBaseTransport | None = None   # tests inject a mock transport here
 
 
 def parse_lrc(lrc: str) -> list[dict]:
@@ -66,6 +67,20 @@ async def _search(client: httpx.AsyncClient, **params) -> list[dict]:
         return r.json() if r.status_code == 200 else []
     except Exception:
         return []
+
+
+async def _get_exact(client: httpx.AsyncClient, title: str, artist: str, album: str | None,
+                     duration: float) -> dict | None:
+    """One-request lookup by the track's exact signature (LRCLIB matches duration within 2 s).
+    Most recognized songs answer here at once, skipping the whole search fan-out."""
+    params = {"track_name": title, "artist_name": artist, "duration": round(duration)}
+    if album:
+        params["album_name"] = album
+    try:
+        r = await client.get(f"{API}/get", params=params)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
 
 
 def _score(hit: dict, titles: list[str], artist: str, duration: float | None) -> float | None:
@@ -138,7 +153,7 @@ async def _lyrics_ovh(client: httpx.AsyncClient, title: str, artist: str) -> dic
     return {"plain": lines, "source": "lyrics.ovh", "found_as": f"{artist} - {title}"}
 
 
-async def fetch(title: str, artist: str, adamid: str | None = None) -> dict | None:
+async def fetch(title: str, artist: str, adamid: str | None = None, album: str | None = None) -> dict | None:
     """{"synced": [{t, text}...] | "plain": [str...], "duration": lyrics' own length,
     "track_duration": real track length if known}. Without lyrics: just {"track_duration"} or None.
 
@@ -148,18 +163,24 @@ async def fetch(title: str, artist: str, adamid: str | None = None) -> dict | No
         return _cache[key]
     variants = title_variants(title)
     titles = [norm(v) for v in variants]
-    async with httpx.AsyncClient(headers=HEADERS, timeout=8) as c:
-        queries = [_search(c, track_name=v, artist_name=artist) for v in variants[:3]]
-        queries += [_search(c, q=v) for v in variants if v not in (title,)][:3]
-        duration, *results = await asyncio.gather(track_duration(c, adamid), *queries)
+    async with httpx.AsyncClient(headers=HEADERS, timeout=8, transport=_transport) as c:
+        duration = await track_duration(c, adamid)
         best, best_score, seen = None, None, set()
-        for hit in (h for r in results for h in r):
-            if hit.get("id") in seen or not (hit.get("syncedLyrics") or hit.get("plainLyrics")):
-                continue
-            seen.add(hit.get("id"))
-            sc = _score(hit, titles, norm(artist), duration)
-            if sc is not None and (best_score is None or sc > best_score):
-                best, best_score = hit, sc
+        if duration:   # fast path: the exact signature, one request
+            hit = await _get_exact(c, clean_title(title), artist, album, duration)
+            if hit and hit.get("syncedLyrics") and _score(hit, titles, norm(artist), duration) is not None:
+                best = hit
+        if best is None:
+            queries = [_search(c, track_name=v, artist_name=artist) for v in variants[:3]]
+            queries += [_search(c, q=v) for v in variants if v not in (title,)][:3]
+            results = await asyncio.gather(*queries)
+            for hit in (h for r in results for h in r):
+                if hit.get("id") in seen or not (hit.get("syncedLyrics") or hit.get("plainLyrics")):
+                    continue
+                seen.add(hit.get("id"))
+                sc = _score(hit, titles, norm(artist), duration)
+                if sc is not None and (best_score is None or sc > best_score):
+                    best, best_score = hit, sc
         result = None
         if best and best.get("syncedLyrics"):
             result = {"synced": parse_lrc(best["syncedLyrics"])}

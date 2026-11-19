@@ -67,6 +67,27 @@ DEFAULTS = {"translate": None, "light": None, "whisper": "auto", "language": Non
 SETTINGS_FILE = Path("data/settings.json")
 
 
+def ensure_cert(cert: Path, key: Path) -> bool:
+    """A self-signed certificate for --https (made once, kept in data/). HTTPS is what lets a
+    browser on ANOTHER device open the microphone or the page can be installed as an app;
+    browsers only allow those on localhost or over HTTPS."""
+    if cert.is_file() and key.is_file():
+        return True
+    if not shutil.which("openssl"):
+        log.error("openssl not found: install it, or put your own %s and %s in place", cert, key)
+        return False
+    cert.parent.mkdir(parents=True, exist_ok=True)
+    san = f"subjectAltName=DNS:{socket.gethostname()},DNS:localhost,IP:127.0.0.1"
+    r = subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-days", "3650",
+                        "-nodes", "-subj", "/CN=live-lyrics", "-addext", san,
+                        "-keyout", str(key), "-out", str(cert)], capture_output=True, text=True)
+    if r.returncode != 0:
+        log.error("could not make a certificate: %s", r.stderr.strip().splitlines()[-1:])
+        return False
+    log.info("made a self-signed certificate: %s (browsers will warn once; that's expected)", cert)
+    return True
+
+
 def load_settings() -> dict | None:
     """What was chosen on the start page last time (None: never)."""
     try:
@@ -113,6 +134,7 @@ class Session:
         self.transcribers: dict = {}
         self.browser = None
         self.kiosk = False   # we open the full-screen window ourselves
+        self.scheme = "http"
         self.whisper_threads, self.whisper_device, self.simulate, self.port = whisper_threads, whisper_device, simulate, port
 
     def display_path(self) -> str:
@@ -174,7 +196,7 @@ class Session:
             self.browser.terminate()
             await asyncio.to_thread(self.browser.wait)
         BROWSER_FLAGS[:] = ["--disable-gpu"] if light else []
-        self.browser = launch_display(f"http://0.0.0.0:{self.port}{path}")
+        self.browser = launch_display(f"{self.scheme}://0.0.0.0:{self.port}{path}")
         self.browser_light = light
 
 
@@ -254,6 +276,23 @@ def build_app(session, open_path: str | None = None, start_with: dict | None = N
     @app.get("/setup")
     async def setup():
         return page("setup.html")
+
+    @app.get("/history")
+    async def history_page():
+        return page("history.html")
+
+    @app.get("/manifest.webmanifest")
+    async def manifest():
+        return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+
+    @app.get("/icon.svg")
+    async def icon():
+        return FileResponse(STATIC / "icon.svg", media_type="image/svg+xml")
+
+    @app.get("/api/history")
+    async def history():
+        from .library import read_history
+        return {"plays": read_history()}
 
     @app.get("/api/options")
     async def options():
@@ -369,6 +408,10 @@ def main():
     p = argparse.ArgumentParser(description="Live music -> live lyrics display. Run without options to choose the settings on screen.")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=80)
+    p.add_argument("--https", action="store_true",
+                   help="serve over HTTPS with a self-signed certificate (made into data/ on first use). "
+                        "Needed for a browser on ANOTHER device to be the microphone, and for installing "
+                        "the display as an app; browsers allow those only on localhost or over HTTPS")
     p.add_argument("--device", default=None, help="input device index or name (see --list-devices)")
     p.add_argument("--no-display", action="store_true", help="don't open a browser window; open the address in any browser yourself (servers, Docker)")
     p.add_argument("--verbose", action="store_true", help="also log what Whisper hears")
@@ -411,10 +454,17 @@ def main():
         asyncio.run(identify_file(a.identify))
         return
 
+    scheme = "https" if a.https else "http"
     with socket.socket() as probe:  # fail fast and clearly instead of after loading the model
         if probe.connect_ex(("0.0.0.0", a.port)) == 0:
             sys.exit(f"Live Lyrics is already running (port {a.port} is in use). "
-                     f"Its display is at http://0.0.0.0:{a.port}")
+                     f"Its display is at {scheme}://0.0.0.0:{a.port}")
+    ssl_args = {}
+    if a.https:
+        cert, key = Path("data/cert.pem"), Path("data/key.pem")
+        if not ensure_cert(cert, key):
+            sys.exit("could not set up HTTPS")
+        ssl_args = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)}
 
     # Flags given on the command line (or no screen to click on): start right away, as before.
     # Otherwise the start page asks - and offers last time's choices.
@@ -431,11 +481,12 @@ def main():
     if start_with and start_with["light"] is None:
         start_with["light"] = auto_mode()["light"]
     session.kiosk = has_screen
-    print(f"Live Lyrics: open http://0.0.0.0:{a.port} in a browser"
+    session.scheme = scheme
+    print(f"Live Lyrics: open {scheme}://0.0.0.0:{a.port} in a browser"
           + ("" if direct else " to choose the settings and start") + "  (Ctrl+C to stop)", flush=True)
     open_path = None if not has_screen else ("/display?lite=1" if start_with["light"] else "/display") if direct else "/setup"
     app = build_app(session, open_path, start_with)
-    uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
+    uvicorn.run(app, host=a.host, port=a.port, log_level="warning", **ssl_args)
 
 
 if __name__ == "__main__":

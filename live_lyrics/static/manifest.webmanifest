@@ -1,0 +1,14 @@
+{
+  "name": "Live Lyrics",
+  "short_name": "Live Lyrics",
+  "description": "Listens to the room and shows the lyrics in time with the music.",
+  "id": "/display",
+  "start_url": "/display",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#06060a",
+  "theme_color": "#06060a",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Live Lyrics · History</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;800&display=swap">
+<style>
+  :root { --accent:124,156,255; --line:rgba(255,255,255,.12); --dim:rgba(255,255,255,.6); }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html { background:#06060a; }
+  body { min-height:100vh; color:#f5f5f7; font-family:"Rubik",system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;
+    display:flex; justify-content:center; padding:5vh 16px; overflow-x:hidden; }
+  .aurora { position:fixed; inset:0; z-index:-1; overflow:hidden; }
+  .aurora i { position:absolute; width:78vmax; height:78vmax; border-radius:50%; left:50%; top:50%; margin:-39vmax; }
+  .aurora i:nth-child(1) { background:radial-gradient(circle, rgba(124,156,255,.22), transparent 62%); animation:a1 38s ease-in-out infinite alternate; }
+  .aurora i:nth-child(2) { background:radial-gradient(circle, rgba(255,60,170,.12), transparent 60%); animation:a2 46s ease-in-out infinite alternate; }
+  @keyframes a1 { 0%{transform:translate(-22vw,-12vh)} 100%{transform:translate(18vw,10vh) scale(1.2)} }
+  @keyframes a2 { 0%{transform:translate(30vw,18vh)} 100%{transform:translate(-26vw,-6vh) scale(.9)} }
+  .grain { position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.05; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E") repeat; background-size:160px; }
+
+  main { width:min(640px,100%); }
+  .top { text-align:center; margin-bottom:3.6vh; }
+  .brand { font-weight:800; letter-spacing:.42em; margin-inline-start:.42em; font-size:.85rem; color:rgba(255,255,255,.55); }
+  .brand em { font-style:normal; color:rgb(var(--accent)); }
+  h1 { font-size:clamp(1.8rem,3.6vw,2.7rem); font-weight:800; letter-spacing:-.02em; margin-top:.7rem; }
+  h2 { font-size:.74rem; font-weight:600; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); margin:3vh 4px 10px; }
+  .day { display:flex; flex-direction:column; gap:8px; }
+  .play { display:flex; align-items:center; gap:14px; padding:10px 14px; border-radius:16px;
+    background:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.03)); border:1px solid var(--line);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.07); }
+  .play img, .play .noart { width:46px; height:46px; border-radius:10px; object-fit:cover; flex:none;
+    background:linear-gradient(135deg, rgba(var(--accent),.35), rgba(255,122,184,.25)); }
+  .play .noart { display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,.65); font-size:1.2rem; }
+  .play .t { font-weight:600; line-height:1.3; }
+  .play .a { font-size:.85rem; color:var(--dim); }
+  .play time { margin-inline-start:auto; font-size:.85rem; color:var(--dim); font-variant-numeric:tabular-nums; flex:none; }
+  #empty { text-align:center; color:var(--dim); margin-top:8vh; line-height:1.6; text-wrap:balance; }
+  .back { display:block; text-align:center; margin-top:4vh; color:var(--dim); font-size:.9rem; }
+  .back a { color:#fff; }
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i></div>
+<div class="grain"></div>
+<main>
+  <div class="top"><div class="brand">LIVE <em>LYRICS</em></div><h1>What played</h1></div>
+  <div id="days"></div>
+  <div id="empty" hidden>Nothing yet. Every song the display recognises will be listed here.</div>
+  <div class="back">Lyrics screen: <a href="/display">open</a> · Start page: <a href="/setup?stay">open</a></div>
+</main>
+<script>
+const pad = n => String(n).padStart(2, "0");
+function dayName(d) {                                                    // d: the evening's day at midnight
+  const ref = new Date(Date.now() - 6 * 3600 * 1000); ref.setHours(0, 0, 0, 0);
+  const diff = Math.round((ref - d) / 86400000);
+  if (diff <= 0) return "Tonight";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, {weekday: "long", month: "long", day: "numeric"});
+}
+(async () => {
+  const r = await fetch("/api/history"); if (r.status === 401) return location.replace("/login");
+  const plays = (await r.json()).plays;
+  if (!plays.length) return document.getElementById("empty").hidden = false;
+  const groups = new Map();
+  for (const p of plays) {
+    const d = new Date((p.t - 6 * 3600) * 1000); d.setHours(0, 0, 0, 0); // evenings past midnight belong to the night before
+    const k = d.toISOString().slice(0, 10);
+    if (!groups.has(k)) groups.set(k, {date: d, plays: []});
+    groups.get(k).plays.push(p);
+  }
+  const days = document.getElementById("days");
+  for (const {date, plays} of groups.values()) {
+    const h = document.createElement("h2"); h.textContent = dayName(date); days.appendChild(h);
+    const box = document.createElement("div"); box.className = "day"; days.appendChild(box);
+    for (const p of plays) {
+      const row = document.createElement("div"); row.className = "play";
+      const art = p.cover ? Object.assign(document.createElement("img"), {src: p.cover, alt: ""})
+                          : Object.assign(document.createElement("div"), {className: "noart", textContent: "♪"});
+      const txt = document.createElement("div");
+      txt.innerHTML = `<div class="t"></div><div class="a"></div>`;
+      txt.querySelector(".t").textContent = p.title; txt.querySelector(".a").textContent = p.artist;
+      const at = new Date(p.t * 1000), tm = document.createElement("time");
+      tm.textContent = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+      row.append(art, txt, tm); box.appendChild(row);
+    }
+  }
+})();
+</script>
+</body>
+</html>

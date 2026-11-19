@@ -3,6 +3,7 @@ Lets a live band's songs be identified purely from the sung words, with no API k
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 
 from . import lyrics
@@ -10,9 +11,29 @@ from .matcher import SongText, norm
 
 log = logging.getLogger("live-lyrics")
 
+REPLAY_GAP = 600   # a song locked again within this many seconds is the same play, not a new one
+
 
 def song_key(title: str, artist: str) -> str:
     return f"{norm(artist)}|{norm(lyrics.clean_title(title))}"
+
+
+def read_history(path: str | Path = "data/history.jsonl", days: float = 30) -> list[dict]:
+    """The play history, newest first: [{t, key, title, artist, cover}]. Works whether or not
+    the engine is running - it's just the file."""
+    cutoff = time.time() - days * 86400
+    out = []
+    try:
+        for line in Path(path).read_text().splitlines():
+            try:
+                play = json.loads(line)
+                if play.get("t", 0) >= cutoff:
+                    out.append(play)
+            except ValueError:
+                continue   # a line cut short (power cut mid-write): skip it, keep the rest
+    except OSError:
+        return []
+    return out[::-1]
 
 
 class Library:
@@ -25,6 +46,24 @@ class Library:
             except ValueError:   # cut short (e.g. the disk filled up mid-write): start afresh, songs are re-learned
                 log.warning("song library %s is damaged; starting a new one", self.path)
         self.texts = {k: SongText.from_lyrics(s["lyrics"]) for k, s in self.songs.items()}
+        self.history_path = self.path.parent / "history.jsonl"
+        self.last_play: tuple[str, float] | None = None
+
+    def record_play(self, key: str, title: str, artist: str, cover: str | None = None):
+        """Note that a song just came on (for the /history page). Appending one JSON line at a
+        time means a crash can at worst cut the newest line short, never the file."""
+        now = time.time()
+        if self.last_play and self.last_play[0] == key and now - self.last_play[1] < REPLAY_GAP:
+            self.last_play = (key, now)   # the same song re-locked after a hiccup: not a new play
+            return
+        self.last_play = (key, now)
+        try:
+            self.history_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.history_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"t": round(now, 1), "key": key, "title": title, "artist": artist,
+                                    "cover": cover}, ensure_ascii=False) + "\n")
+        except OSError as e:
+            log.warning("could not record the play: %s", e)
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
