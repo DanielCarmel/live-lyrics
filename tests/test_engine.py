@@ -219,3 +219,18 @@ async def test_presence_logs_both_transitions(make_engine, source, caplog):
         assert not e.present
     msgs = [r.message for r in caplog.records]
     assert any("music started" in m for m in msgs) and any("music gone" in m for m in msgs)
+
+
+# ------------------------------------------------------------------ dead input (docking station)
+async def test_dead_input_is_flagged_and_recovery_relearns_the_room(make_engine, source):
+    e = make_engine()
+    source.push(noise(3, level=0.0))          # a dock's "default input": pure digital silence
+    await e.monitor()
+    assert e.dead_since and not e.state.get("mic_dead")
+    e.dead_since = time.time() - eng.MIC_DEAD_AFTER - 1   # ...for a while now
+    await e.monitor()
+    assert e.state.get("mic_dead") is True
+    source.push(noise(3, level=0.1))          # a real microphone takes over
+    await e.monitor()
+    assert not e.state.get("mic_dead") and e.dead_since is None
+    assert e.noise is not None and e.noise > 0.01         # the room was relearned at the new level

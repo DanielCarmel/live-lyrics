@@ -807,22 +807,50 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 // When the server has no microphone of its own (Docker on a Mac or Windows, a remote box), this page
 // listens and streams what it hears to the server as float32 PCM over /ws/audio.
-let mic = null;
+// Docks and monitors like to grab the "default input" or kill the current one when (un)plugged, so the
+// capture heals itself: it remembers the device that worked and asks for it again, watches the track
+// for dying / muting / going digitally silent, and reopens on any sign of trouble.
+let mic = null, micRetryAt = 0;
 async function listen() {
   if (mic) return;
   mic = {};
   if (!navigator.mediaDevices?.getUserMedia || !window.AudioWorklet) { mic = null; return hud("The browser won't open the microphone here: use http://localhost or HTTPS", true); }
+  let prefer = null; try { prefer = localStorage.getItem("micId") || null; } catch {}
+  const wants = {echoCancellation: false, noiseSuppression: false, autoGainControl: false};
   let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}}); }
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: prefer ? {...wants, deviceId: {ideal: prefer}} : wants}); }
   catch (e) { mic = null; console.error("microphone", e); return hud("Microphone not allowed: " + e.message + " - allow it for this site and reload", true); }
-  console.log("microphone:", stream.getAudioTracks()[0]?.label);
+  const track = stream.getAudioTracks()[0];
+  console.log("microphone:", track?.label);
+  try { localStorage.setItem("micId", track?.getSettings().deviceId || ""); } catch {}
   const ctx = new AudioContext();
   const tap = `registerProcessor("tap", class extends AudioWorkletProcessor { process(i) { if (i[0][0]) this.port.postMessage(i[0][0].slice()); return true; } })`;
   try { await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([tap], {type: "application/javascript"}))); }
   catch (e) { mic = null; console.error("audio worklet", e); stream.getTracks().forEach(t => t.stop()); return hud("This browser can't capture audio: " + e.message, true); }
   const node = new AudioWorkletNode(ctx, "tap"); ctx.createMediaStreamSource(stream).connect(node);
+
+  const reopen = why => {                        // close everything and try afresh (at most once per few seconds)
+    if (!mic || mic.track !== track || Date.now() < micRetryAt) return;
+    micRetryAt = Date.now() + 4000;
+    console.warn("microphone:", why, "- reopening");
+    hud("Microphone " + why + " - reconnecting", true);
+    stopListening(); setTimeout(listen, 500);
+  };
+  track.onended = () => reopen("vanished");
+  track.onmute = () => setTimeout(() => { if (mic?.track === track && track.muted) reopen("went mute"); }, 1500);
+  const onDevices = () => setTimeout(() => {     // a dock/monitor was (un)plugged: is our device still alive?
+    if (mic?.track === track && (track.readyState !== "live" || track.muted)) reopen("was taken by another device");
+  }, 800);
+  navigator.mediaDevices.addEventListener?.("devicechange", onDevices);
+  // A dead dock input often keeps delivering exact zeros (a real microphone always has a noise floor):
+  let lastSound = Date.now();
+  const watchdog = setInterval(() => {
+    if (ctx.state === "running" && Date.now() - lastSound > 5000) { lastSound = Date.now(); reopen("went silent (did a dock take the input?)"); }
+  }, 1000);
+
   let ws = null, chunks = [], size = 0, sent = 0;
   node.port.onmessage = e => {
+    for (let k = 0; k < e.data.length; k += 16) if (e.data[k] !== 0) { lastSound = Date.now(); break; }
     chunks.push(e.data); size += e.data.length;
     if (size < ctx.sampleRate / 10) return;                                   // send a tenth of a second at a time
     if (ws?.readyState === 1) { const buf = new Float32Array(size); let i = 0; for (const c of chunks) { buf.set(c, i); i += c.length; } ws.send(buf); if (++sent === 10) { hud(""); console.log("microphone: streaming to the server"); } }
@@ -837,23 +865,19 @@ async function listen() {
     };
   };
   open();
-  mic = {stream, ctx, close: () => ws?.close()};
-  const wake = () => { if (ctx.state === "running") return; hud("Click or press a key to start listening", true); ctx.resume(); };   // browsers may hold back audio until the page is touched
+  mic = {stream, ctx, track, close: () => ws?.close(),
+         cleanup: () => { clearInterval(watchdog); navigator.mediaDevices.removeEventListener?.("devicechange", onDevices); }};
+  const wake = () => { if (ctx.state !== "suspended") return; hud("Click or press a key to start listening", true); ctx.resume(); };   // browsers may hold back audio until the page is touched
   ctx.onstatechange = () => { console.log("audio context", ctx.state); if (ctx.state === "running") hud("Listening through this browser"); else wake(); };
-  for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, () => ctx.resume());
+  for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, () => { if (ctx.state === "suspended") ctx.resume(); });
   ctx.state === "running" ? hud("Listening through this browser") : wake();
 }
 function stopListening() {
   if (!mic?.ctx) return;
   const m = mic; mic = null;
-  m.close(); m.stream.getTracks().forEach(t => t.stop()); m.ctx.close();
+  m.ctx.onstatechange = null;   // (a closed context must not try to wake itself)
+  m.cleanup?.(); m.close(); m.stream.getTracks().forEach(t => t.stop()); m.ctx.close();
 }
-
-// Keep the screen from sleeping while the lyrics display is up
-async function stayAwake() { try { await navigator.wakeLock.request("screen"); } catch {} }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") stayAwake(); });
-stayAwake();
-
 setStep(0); connect(); requestAnimationFrame(frame);
 </script>
 </body>
